@@ -35,13 +35,15 @@ class Evaluator:
         )
         self.results = []
 
-    def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
+    # def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
+    def evaluate_helper(self, i: int, j: int, conversation: Any, response: str) -> Tuple[int, int, str, str, str, str]:
         """Evaluate a single response."""
         target_question = conversation.target_question
         pass_criteria = conversation.pass_criteria
-        prompt = JUDGE_PROMPT.format(response, target_question)
+        # prompt = JUDGE_PROMPT.format(response, target_question) # yan
+        prompt = JUDGE_PROMPT.format(response, pass_criteria)
         judgement = self.evaluation_model.generate([{"role": "user", "content": prompt}])
-        return i, conversation.axis, judgement.reasoning, judgement.verdict, pass_criteria
+        return i, j, conversation.axis, judgement.reasoning, judgement.verdict, pass_criteria
 
     def evaluate(self, max_workers:int = 1) -> List[Dict]:
         """Evaluate all responses for each conversation"""
@@ -62,12 +64,14 @@ class Evaluator:
                 else:
                     for j, response in enumerate(self.responses[convo.question_id]):
                         futures.append(
-                            executor.submit(self.evaluate_helper, i, convo, response)
+                            # executor.submit(self.evaluate_helper, i, convo, response) # yan
+                            executor.submit(self.evaluate_helper, i, j, convo, response)
                         )
 
             for future in tqdm(futures, desc="Evaluating responses", total=len(futures)):
                 try:
-                    i, axis, reasoning, verdict, pass_criteria = future.result()
+                    # i, axis, reasoning, verdict, pass_criteria = future.result()  # yan
+                    i, j, axis, reasoning, verdict, pass_criteria = future.result()
                     self.results.append({
                         'question_id': self.conversations[i].question_id,
                         'axis': axis,
