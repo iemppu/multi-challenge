@@ -63,8 +63,13 @@ def _safe_generate(llm: Any, messages: List[Dict[str, str]], **kwargs) -> str:
     except (TypeError, ValueError):
         # 签名拿不到：为了兼容 multi-challenge，这里宁可不传 kwargs
         filtered = {}
+        
+    # 2) 如果含 system role，先做 normalize（避免 multi-challenge 直接拒绝 system）
+    has_system = any((m.get("role") == "system") for m in messages)
+    if has_system:
+        messages = _normalize_messages_no_system(messages)
 
-    # 2) 先尝试原 messages（可能含 system）
+    # 3) 尝试调用 generate（messages 已按需 normalize）
     try:
         return llm.generate(messages, **filtered) if filtered else llm.generate(messages)
 
@@ -294,4 +299,5 @@ class SLSMWrapper:
         """
         state = self.track_state(original_conversation)
         msgs = self.build_final_messages(original_conversation, state, system_prompt=system_prompt)
-        return underlying_llm.generate(msgs, **gen_kwargs)
+        # return underlying_llm.generate(msgs, **gen_kwargs)
+        return _safe_generate(underlying_llm, msgs, **gen_kwargs)
