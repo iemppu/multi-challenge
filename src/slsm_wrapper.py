@@ -13,22 +13,73 @@ class LLM(Protocol):
     def generate(self, messages: List[Dict[str, str]]) -> str:
         ...
 
+def _normalize_messages_no_system(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    multi-challenge 的 OpenAIModel.generate 只接受 role 为 'user' 或 'assistant' 的 message 列表。
+    这里把所有 system message 折叠进第一个 user message（若不存在 user，就新建一个 user）。
+    """
+    sys_chunks: List[str] = []
+    kept: List[Dict[str, str]] = []
+
+    for m in messages:
+        r = m.get("role")
+        c = m.get("content", "")
+        if r == "system":
+            if c:
+                sys_chunks.append(c)
+        elif r in ("user", "assistant"):
+            kept.append({"role": r, "content": c})
+        else:
+            # 未知 role：最稳妥当作 user
+            kept.append({"role": "user", "content": c})
+
+    if not sys_chunks:
+        return kept
+
+    sys_prefix = "SYSTEM INSTRUCTIONS:\n" + "\n\n".join(sys_chunks).strip()
+
+    if kept and kept[0]["role"] == "user":
+        kept[0]["content"] = sys_prefix + "\n\n" + (kept[0].get("content") or "")
+        return kept
+
+    return [{"role": "user", "content": sys_prefix}] + kept
+
+
 def _safe_generate(llm: Any, messages: List[Dict[str, str]], **kwargs) -> str:
     """
-    Call llm.generate(messages, **kwargs) if supported; otherwise fall back to llm.generate(messages).
-    This makes SLSM compatible with multi-challenge's OpenAIModel.generate signature.
+    尝试 llm.generate(messages, **kwargs)（如果 generate 支持这些 kwargs），
+    否则降级为 llm.generate(messages)。
+
+    同时兼容 multi-challenge 的 OpenAIModel.generate 的 prompt 约束：
+    - prompt 只能是 str 或 role 为 user/assistant 的 message 列表
+    - 不接受 system role
     """
+    # 1) 过滤 kwargs：只传 generate() 签名里明确接受的参数
+    filtered: Dict[str, Any] = {}
     try:
         sig = inspect.signature(llm.generate)
         accepted = set(sig.parameters.keys())
         filtered = {k: v for k, v in kwargs.items() if k in accepted}
-        return llm.generate(messages, **filtered) if filtered else llm.generate(messages)
     except (TypeError, ValueError):
-        # If signature introspection fails, do a best-effort call.
-        try:
-            return llm.generate(messages, **kwargs)
-        except TypeError:
-            return llm.generate(messages)
+        # 签名拿不到：为了兼容 multi-challenge，这里宁可不传 kwargs
+        filtered = {}
+
+    # 2) 先尝试原 messages（可能含 system）
+    try:
+        return llm.generate(messages, **filtered) if filtered else llm.generate(messages)
+
+    except TypeError:
+        # generate 不吃 kwargs 或签名不匹配：丢弃 kwargs 重试
+        return llm.generate(messages)
+
+    except ValueError as e:
+        # 3) multi-challenge 明确拒绝 system role：normalize 后重试（并且不带 kwargs）
+        msg = str(e)
+        if "Prompt must be a string or a list of dictionaries" in msg:
+            normalized = _normalize_messages_no_system(messages)
+            return llm.generate(normalized)
+        raise
+
 
 @dataclass
 class SemanticState:
