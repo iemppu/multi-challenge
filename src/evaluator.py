@@ -7,6 +7,22 @@ from tqdm import tqdm
 import time
 import random
 
+
+
+def call_with_retry(fn, max_retries=5): # for handling 429 errors
+    for i in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                wait = 1.5 * (2 ** i) + random.uniform(0, 0.5)
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError("Max retries exceeded")
+
+
+
 class JudgeResponse(BaseModel):
     reasoning: str
     verdict: Literal["YES", "NO"]
@@ -37,18 +53,6 @@ class Evaluator:
             response_format=JudgeResponse
         )
         self.results = []
-
-    def call_with_retry(fn, max_retries=5): # for handling 429 errors
-        for i in range(max_retries):
-            try:
-                return fn()
-            except Exception as e:
-                if "429" in str(e) or "rate limit" in str(e).lower():
-                    wait = 1.5 * (2 ** i) + random.uniform(0, 0.5)
-                    time.sleep(wait)
-                else:
-                    raise
-        raise RuntimeError("Max retries exceeded")
 
     
     # def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
