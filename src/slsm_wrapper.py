@@ -3,13 +3,32 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Protocol
 import json
+import inspect
 
 Role = Literal["system", "user", "assistant"]
 
 class LLM(Protocol):
     """Model-agnostic interface."""
-    def generate(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    # def generate(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    def generate(self, messages: List[Dict[str, str]]) -> str:
         ...
+
+def _safe_generate(llm: Any, messages: List[Dict[str, str]], **kwargs) -> str:
+    """
+    Call llm.generate(messages, **kwargs) if supported; otherwise fall back to llm.generate(messages).
+    This makes SLSM compatible with multi-challenge's OpenAIModel.generate signature.
+    """
+    try:
+        sig = inspect.signature(llm.generate)
+        accepted = set(sig.parameters.keys())
+        filtered = {k: v for k, v in kwargs.items() if k in accepted}
+        return llm.generate(messages, **filtered) if filtered else llm.generate(messages)
+    except (TypeError, ValueError):
+        # If signature introspection fails, do a best-effort call.
+        try:
+            return llm.generate(messages, **kwargs)
+        except TypeError:
+            return llm.generate(messages)
 
 @dataclass
 class SemanticState:
@@ -133,7 +152,12 @@ class SLSMController:
             {"role": "system", "content": CONTROLLER_SYSTEM},
             {"role": "user", "content": prompt},
         ]
-        raw = self.llm.generate(messages, temp=self.cfg.controller_model_temp, max_tokens=self.cfg.controller_max_tokens)
+        # raw = self.llm.generate(messages, temp=self.cfg.controller_model_temp, max_tokens=self.cfg.controller_max_tokens)
+        raw = _safe_generate(
+            self.llm, messages,
+            temp=self.cfg.controller_model_temp,
+            max_tokens=self.cfg.controller_max_tokens
+        )
 
         # Strict JSON parse
         try:
