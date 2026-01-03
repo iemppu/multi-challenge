@@ -4,25 +4,6 @@ from typing import List, Dict, Tuple, Any, Literal
 from src.models.openai import OpenAIModel
 from tqdm import tqdm
 
-import time
-import random
-
-
-
-def call_with_retry(fn, max_retries=5): # for handling 429 errors
-    for i in range(max_retries):
-        try:
-            return fn()
-        except Exception as e:
-            if "429" in str(e) or "rate limit" in str(e).lower():
-                wait = 1.5 * (2 ** i) + random.uniform(0, 0.5)
-                time.sleep(wait)
-            else:
-                raise
-    raise RuntimeError("Max retries exceeded")
-
-
-
 class JudgeResponse(BaseModel):
     reasoning: str
     verdict: Literal["YES", "NO"]
@@ -49,26 +30,18 @@ class Evaluator:
         self.evaluation_model = OpenAIModel(
             model="gpt-4o-2024-08-06", 
             temp=0, 
-            # max_tokens=4096, # not accept this input
+            max_tokens=4096,
             response_format=JudgeResponse
         )
         self.results = []
 
-    
-    # def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
-    def evaluate_helper(self, i: int, j: int, conversation: Any, response: str) -> Tuple[int, int, str, str, str, str]:
+    def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
         """Evaluate a single response."""
         target_question = conversation.target_question
         pass_criteria = conversation.pass_criteria
-        # prompt = JUDGE_PROMPT.format(response, target_question) # yan
-        prompt = JUDGE_PROMPT.format(response, pass_criteria)
-        # judgement = self.evaluation_model.generate([{"role": "user", "content": prompt}]) # for handling 429 errors
-        judgement = call_with_retry(
-            lambda: self.evaluation_model.generate(
-                [{"role": "user", "content": prompt}]
-            )
-        )
-        return i, j, conversation.axis, judgement.reasoning, judgement.verdict, pass_criteria
+        prompt = JUDGE_PROMPT.format(response, target_question)
+        judgement = self.evaluation_model.generate([{"role": "user", "content": prompt}])
+        return i, conversation.axis, judgement.reasoning, judgement.verdict, pass_criteria
 
     def evaluate(self, max_workers:int = 1) -> List[Dict]:
         """Evaluate all responses for each conversation"""
@@ -89,14 +62,12 @@ class Evaluator:
                 else:
                     for j, response in enumerate(self.responses[convo.question_id]):
                         futures.append(
-                            # executor.submit(self.evaluate_helper, i, convo, response) # yan
-                            executor.submit(self.evaluate_helper, i, j, convo, response)
+                            executor.submit(self.evaluate_helper, i, convo, response)
                         )
 
             for future in tqdm(futures, desc="Evaluating responses", total=len(futures)):
                 try:
-                    # i, axis, reasoning, verdict, pass_criteria = future.result()  # yan
-                    i, j, axis, reasoning, verdict, pass_criteria = future.result()
+                    i, axis, reasoning, verdict, pass_criteria = future.result()
                     self.results.append({
                         'question_id': self.conversations[i].question_id,
                         'axis': axis,
