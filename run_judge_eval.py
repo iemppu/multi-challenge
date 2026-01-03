@@ -1,5 +1,5 @@
-%cd /content/multi-challenge
-!cat > run_judge_eval.py << 'PY'
+# %cd /content/multi-challenge
+# !cat > run_judge_eval.py << 'PY'
 import os, json, argparse
 from collections import defaultdict
 
