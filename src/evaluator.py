@@ -30,7 +30,7 @@ class Evaluator:
         self.evaluation_model = OpenAIModel(
             model="gpt-4o-2024-08-06", 
             temp=0, 
-            max_tokens=4096,
+            # max_tokens=4096, # by yan
             response_format=JudgeResponse
         )
         self.results = []
