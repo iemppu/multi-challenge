@@ -4,6 +4,9 @@ from typing import List, Dict, Tuple, Any, Literal
 from src.models.openai import OpenAIModel
 from tqdm import tqdm
 
+import time
+import random
+
 class JudgeResponse(BaseModel):
     reasoning: str
     verdict: Literal["YES", "NO"]
@@ -35,6 +38,19 @@ class Evaluator:
         )
         self.results = []
 
+    def call_with_retry(fn, max_retries=5): # for handling 429 errors
+        for i in range(max_retries):
+            try:
+                return fn()
+            except Exception as e:
+                if "429" in str(e) or "rate limit" in str(e).lower():
+                    wait = 1.5 * (2 ** i) + random.uniform(0, 0.5)
+                    time.sleep(wait)
+                else:
+                    raise
+        raise RuntimeError("Max retries exceeded")
+
+    
     # def evaluate_helper(self, i: int, conversation: Any, response: str) -> Tuple[int, str, str, str, str]:
     def evaluate_helper(self, i: int, j: int, conversation: Any, response: str) -> Tuple[int, int, str, str, str, str]:
         """Evaluate a single response."""
@@ -42,7 +58,12 @@ class Evaluator:
         pass_criteria = conversation.pass_criteria
         # prompt = JUDGE_PROMPT.format(response, target_question) # yan
         prompt = JUDGE_PROMPT.format(response, pass_criteria)
-        judgement = self.evaluation_model.generate([{"role": "user", "content": prompt}])
+        # judgement = self.evaluation_model.generate([{"role": "user", "content": prompt}]) # for handling 429 errors
+        judgement = call_with_retry(
+            lambda: self.evaluation_model.generate(
+                [{"role": "user", "content": prompt}]
+            )
+        )
         return i, j, conversation.axis, judgement.reasoning, judgement.verdict, pass_criteria
 
     def evaluate(self, max_workers:int = 1) -> List[Dict]:
