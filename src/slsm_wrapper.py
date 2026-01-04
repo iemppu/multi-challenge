@@ -7,11 +7,28 @@ import inspect
 
 Role = Literal["system", "user", "assistant"]
 
+# def _parse_json_obj(text: str) -> dict:
+    # m = re.search(r"\{.*\}", text, flags=re.S)
+    # if not m:
+    #     return {}
+    # return json.loads(m.group(0))
+
 def _parse_json_obj(text: str) -> dict:
-    m = re.search(r"\{.*\}", text, flags=re.S)
+    """
+    Best-effort parse the FIRST JSON object from text.
+    - Non-greedy match
+    - Safe exception handling (never throws)
+    """
+    if not text:
+        return {}
+    # Non-greedy: take the first {...}
+    m = re.search(r"\{.*?\}", text, flags=re.S)
     if not m:
         return {}
-    return json.loads(m.group(0))
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return {}
 
 
 class LLM(Protocol):
@@ -215,6 +232,12 @@ Your job:
 2) Track constraints explicitly stated in the conversation (format/style/forbidden words/requirements).
 3) Track edits/revisions: if user changes a requirement, add an edit and update relevant facts/constraints.
 4) Mark contradictions as assumption.status="contradicted" or constraint.status="violated".
+4.5) Detect conflicts between [NEW_MESSAGE] and [PREVIOUS_STATE_JSON]:
+     - If NEW_MESSAGE contradicts any FACT, record a contradiction by either:
+       (i) adding an ASSUMPTION with status="contradicted" describing the conflict, or
+       (ii) marking a relevant CONSTRAINT as status="violated" (text should state what was violated).
+     - If NEW_MESSAGE contradicts an existing ASSUMPTION marked valid, flip it to "contradicted".
+     - If NEW_MESSAGE violates any CONSTRAINT, set that constraint to "violated".
 5) Set plan.mode:
    - "verify" if any contradiction/violation exists that can be resolved using existing context.
    - "clarify" if a task-critical unknown remains open (but do NOT ask the user; instead add required_fixes that avoid guessing).
@@ -395,61 +418,101 @@ class SLSMWrapper:
             )
             return _safe_generate(underlying_llm, msgs, **gen_kwargs)
 
-        # ---- (B) on_detection: two-pass ----
+        # ---- (B) on_detection: two-pass with semantic mismatch detection ----
         
         # pass 0: no-memory / no-injection
         msgs0 = self.build_final_messages(
             original_conversation, state, system_prompt=system_prompt, inject_override=False
         )
         y0 = _safe_generate(underlying_llm, msgs0, **gen_kwargs)
-    
-        # build injected note (but do NOT generate yet)
-        msgs1 = self.build_final_messages(
-            original_conversation, state, system_prompt=system_prompt, inject_override=True
+
+        # detection: feed y0 back to controller, compare against state
+        st_after = self._detect_mismatch_by_state_update(
+            prev_state=state,
+            original_conversation=original_conversation,
+            y0=y0,
         )
-    
-        # extract the SLSM note text (system message that starts with [SLSM MEMORY NOTE])
-        state_note = ""
-        for m in msgs1:
-            if m.get("role") == "system" and (m.get("content") or "").startswith("[SLSM MEMORY NOTE]"):
-                state_note = m["content"]
-                break
-    
-        # if no note exists, nothing to inject; return y0
-        if not state_note:
+        
+        # no mismatch => accept y0
+        if st_after is None:
             return y0
+
+        # mismatch => inject using the UPDATED state (st_after) and regenerate once
+        msgs1 = self.build_final_messages(
+            original_conversation, st_after, system_prompt=system_prompt, inject_override=True
+        )
+        y1 = _safe_generate(underlying_llm, msgs1, **gen_kwargs)
+        return y1
+
+
+#     def _detect_mismatch(self, state_note: str, y0: str) -> bool:
+#         """
+#         Minimal mismatch: controller verifies whether y0 violates the constraints
+#         in the SLSM MEMORY NOTE. Only depends on (S_T, y0).
+#         """
+#         prompt = f"""
+# You are a strict verifier.
+
+# SLSM MEMORY NOTE:
+# {state_note}
+
+# Candidate answer y0:
+# {y0}
+
+# Return ONLY JSON:
+# {{"mismatch": true/false}}
+
+# Definition:
+# mismatch=true iff y0 clearly violates any constraint / required fix in the note,
+# or clearly fails to follow an explicit format constraint (e.g., word/sentence limits).
+# Be conservative.
+# """
+#         # IMPORTANT: use the controller's LLM (temp=0)
+#         out = self.controller.llm.generate([{"role":"user","content":prompt}])  # adjust attribute name if needed
+#         obj = _parse_json_obj(out)
+#         return bool(obj.get("mismatch", False))
+
+    def _state_has_mismatch(self, st: SemanticState) -> bool:
+        """Mismatch iff the updated state indicates any violation/contradiction or non-proceed plan."""
+        # 1) explicit constraint violations
+        for c in (st.constraints or []):
+            if (c.get("status") or "").strip() == "violated":
+                return True
     
-        # mismatch decision based only on (S_T note, y0)
-        if self._detect_mismatch(state_note, y0):
-            y1 = _safe_generate(underlying_llm, msgs1, **gen_kwargs)
-            return y1
+        # 2) explicit assumption contradictions
+        for a in (st.assumptions or []):
+            if (a.get("status") or "").strip() == "contradicted":
+                return True
     
-        return y0
-
-
-    def _detect_mismatch(self, state_note: str, y0: str) -> bool:
+        # 3) plan mode escalated (controller decided verify/clarify)
+        mode = (st.plan or {}).get("mode", "proceed")
+        if mode in ("verify", "clarify"):
+            return True
+    
+        return False
+    
+    
+    def _detect_mismatch_by_state_update(
+        self,
+        prev_state: SemanticState,
+        original_conversation: List[Dict[str, str]],
+        y0: str,
+    ) -> Optional[SemanticState]:
         """
-        Minimal mismatch: controller verifies whether y0 violates the constraints
-        in the SLSM MEMORY NOTE. Only depends on (S_T, y0).
+        Feed y0 back to controller as a NEW assistant message, producing updated semantic state.
+        Returns the updated state if mismatch detected; otherwise returns None.
+    
+        IMPORTANT: this is the core "semantic conflict detection" between (prev_state) and (y0).
         """
-        prompt = f"""
-You are a strict verifier.
+        try:
+            st_after = self.controller.update(
+                history=original_conversation,
+                new_msg={"role": "assistant", "content": y0},
+                prev=prev_state,
+            )
+        except Exception:
+            # Fail-safe: if controller update crashes for any reason, treat as mismatch so we inject+regenerate once.
+            return prev_state
+    
+        return st_after if self._state_has_mismatch(st_after) else None
 
-SLSM MEMORY NOTE:
-{state_note}
-
-Candidate answer y0:
-{y0}
-
-Return ONLY JSON:
-{{"mismatch": true/false}}
-
-Definition:
-mismatch=true iff y0 clearly violates any constraint / required fix in the note,
-or clearly fails to follow an explicit format constraint (e.g., word/sentence limits).
-Be conservative.
-"""
-        # IMPORTANT: use the controller's LLM (temp=0)
-        out = self.controller.llm.generate([{"role":"user","content":prompt}])  # adjust attribute name if needed
-        obj = _parse_json_obj(out)
-        return bool(obj.get("mismatch", False))
