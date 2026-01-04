@@ -4,14 +4,9 @@ from anthropic import Anthropic
 from src.models.base import ModelProvider
 
 
-PromptType = Union[str, List[Dict[str, Any]]]
-
 class ClaudeModel(ModelProvider):
 
     def __init__(self, model, temp, max_tokens=2048, timeout=None):
-        import os
-        from anthropic import Anthropic
-
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set")
@@ -29,7 +24,6 @@ class ClaudeModel(ModelProvider):
         system_text = None
         claude_messages = []
 
-        # --- split system vs others ---
         for m in messages:
             role = m["role"]
             text = m.get("content") or ""
@@ -54,10 +48,8 @@ class ClaudeModel(ModelProvider):
             model=self.model,
             temperature=self.temp,
             max_tokens=self.max_tokens,
-            system=system_blocks,      # must be list[block] or None
-            messages=claude_messages,  # content must be list[block]
+            system=system_blocks,
+            messages=claude_messages,
         )
 
-        # canonical extraction
         return resp.content[0].text
-
