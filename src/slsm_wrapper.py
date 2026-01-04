@@ -168,6 +168,7 @@ class SemanticState:
 
 @dataclass
 class SLSMConfig:
+    disable_controller: bool = False   # NEW: if True, do not call controller at all
     controller_model_temp: float = 0.0
     controller_max_tokens: int = 1200
 
@@ -409,6 +410,15 @@ class SLSMWrapper:
         """
         Main entry: track state, then generate final response from underlying model.
         """
+        # Hard no-controller baseline: no tracking, no injection, just run underlying LLM
+        if getattr(self.cfg, "disable_controller", False):
+            msgs: List[Dict[str, str]] = []
+            if system_prompt:
+                msgs.append({"role": "system", "content": system_prompt})
+            msgs.extend(original_conversation)
+            return _safe_generate(underlying_llm, msgs, **gen_kwargs)
+
+        
         state = self.track_state(original_conversation)
 
         # ---- (A) default behavior: keep your old logic ----
