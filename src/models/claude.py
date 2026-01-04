@@ -1,5 +1,4 @@
 import os
-
 from anthropic import Anthropic
 from src.models.base import ModelProvider
 
@@ -38,7 +37,8 @@ class ClaudeModel(ModelProvider):
                     ]
                 })
 
-        system_blocks = None
+        # 🔥 critical: system must ALWAYS be a list
+        system_blocks = []
         if system_text:
             system_blocks = [
                 {"type": "text", "text": system_text}
