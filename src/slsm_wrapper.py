@@ -84,6 +84,22 @@ def _safe_generate(llm: Any, messages: List[Dict[str, str]], **kwargs) -> str:
             normalized = _normalize_messages_no_system(messages)
             return llm.generate(normalized)
         raise
+        
+def _turn_text(turn: Dict[str, str]) -> str:
+    """Best-effort stringify a single message turn."""
+    role = (turn.get("role") or "").upper()
+    content = turn.get("content") or ""
+    return f"{role}: {content}"
+
+def _evidence_grounded(evidence: str, turn_text: str) -> bool:
+    """
+    Very strict grounding check: evidence must be a literal substring of the cited turn text.
+    This is intentionally conservative to kill hallucinated 'facts'.
+    """
+    ev = (evidence or "").strip()
+    if not ev:
+        return False
+    return ev in turn_text
 
 
 @dataclass
@@ -139,6 +155,14 @@ class SLSMConfig:
     # Keep the memory note small
     note_max_items: int = 6
 
+    # --- Evidence-gated injection ---
+    # If True, only inject facts that have explicit evidence span grounded in the conversation.
+    gate_facts_by_evidence: bool = True
+    
+    # Evidence substring match threshold. Keep it simple: we require evidence to be a substring of the cited turn text.
+    # You can later replace with fuzzy match if needed.
+
+
 CONTROLLER_SYSTEM = (
     "You are a strict semantic-state tracker for multi-turn conversations. "
     "Output ONLY valid JSON that matches the requested schema. No extra text."
@@ -159,9 +183,9 @@ def _controller_prompt(history: List[Dict[str, str]], new_msg: Dict[str, str], p
     new_txt = f"{new_msg['role'].upper()}: {new_msg['content']}"
 
     schema = {
-        "facts": [{"id":"F1","text":"...","support_turns":[1,2]}],
+        "facts": [{"id":"F1","text":"...","support_turns": "list[int]  # any turn index that provides evidence","evidence": "..."}],
         "assumptions": [{"id":"A1","text":"...","status":"valid|contradicted|closed"}],
-        "constraints": [{"id":"C1","text":"...","status":"satisfied|violated|closed"}],
+        "constraints": [{"id":"C1","text":"...","status":"satisfied|violated|closed","evidence": "..."}],
         "unknowns": [{"id":"U1","text":"...","status":"open|closed"}],
         "edits": [{"turn": 3, "type":"revision|override", "from":"...", "to":"..."}],
         "plan": {"mode":"proceed|verify|clarify", "reasons":["..."], "required_fixes":["..."]}
@@ -190,9 +214,23 @@ Your job:
    - "proceed" otherwise.
 6) required_fixes must be concrete, action-oriented instructions for the answering model.
 
+CRITICAL INVARIANTS (do not violate):
+
+A) Facts vs Constraints
+- FACTS must be stable across tasks and explicitly stated by the user.
+- Do NOT convert task-specific requirements, context clues, or inferred attributes into facts.
+- If information is specific to the current task/request, store it as a CONSTRAINT, not a FACT.
+
+B) Evidence requirement for FACTS
+- Every FACT must include support_turns: a non-empty list of turn indices.
+- support_turns are 0-indexed over the full original conversation (0..N-1) and may reference ANY turn, including the current turn.
+- Every FACT must include evidence: a short verbatim span copied from the cited turn(s) content (no paraphrase).
+- If you cannot point to explicit evidence in the conversation, DO NOT create a fact. Represent uncertainty as an unknown or assumption instead.
+
 Output JSON ONLY with this schema (no additional keys):
 {json.dumps(schema, ensure_ascii=False)}
 """.strip()
+
 
 class SLSMController:
     """
@@ -266,7 +304,7 @@ class SLSMWrapper:
         msgs: List[Dict[str, str]] = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
-
+    
         inject_note = False
         mode = (state.plan or {}).get("mode", "proceed")
         if self.cfg.inject == "always":
@@ -275,17 +313,57 @@ class SLSMWrapper:
             inject_note = True
         elif self.cfg.inject == "never":
             inject_note = False
-
+    
         if inject_note:
-            note = state.to_compact_note(max_items=self.cfg.note_max_items)
+            # --- Evidence-gated facts: only inject facts that can be grounded to the conversation ---
+            orig_facts = state.facts  # preserve raw controller output for debugging/inspection
+            gated_facts = orig_facts
+    
+            if getattr(self.cfg, "gate_facts_by_evidence", True):
+                gated_facts = []
+                for f in (orig_facts or []):
+                    support_turns = f.get("support_turns", None)
+                    evidence = (f.get("evidence", "") or "").strip()
+    
+                    # Require both support_turns and evidence for facts
+                    if not isinstance(support_turns, list) or len(support_turns) == 0:
+                        continue
+                    if not evidence:
+                        continue
+    
+                    # Ground evidence against cited turns (strict substring match on raw content)
+                    ok = False
+                    for t in support_turns:
+                        if not isinstance(t, int):
+                            continue
+                        if 0 <= t < len(original_conversation):
+                            turn_content = original_conversation[t].get("content", "") or ""
+                            if _evidence_grounded(evidence, turn_content):
+                                ok = True
+                                break
+    
+                    if ok:
+                        gated_facts.append(f)
+    
+            # Render note using gated facts, but do NOT permanently mutate state
+            state.facts = gated_facts
+            try:
+                note = state.to_compact_note(max_items=self.cfg.note_max_items)
+            finally:
+                state.facts = orig_facts
+    
             if note:
                 # Put note as a system message *after* system_prompt to guide without rewriting user text.
                 # Alternative is as a first user message; this typically has more influence (and more interference).
-                msgs.append({"role": "system", "content": f"[SLSM MEMORY NOTE]\n{note}\n\nFollow the constraints above."})
-
+                msgs.append({
+                    "role": "system",
+                    "content": f"[SLSM MEMORY NOTE]\n{note}\n\nFollow the constraints above."
+                })
+    
         # Append original conversation verbatim (no information loss)
         msgs.extend(original_conversation)
         return msgs
+
 
     def generate_last_turn(
         self,
