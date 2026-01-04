@@ -45,3 +45,7 @@ htmlcov/
 *.log
 *.tmp
 .DS_Store
+
+# Project specific
+multi-challenge-orig/
+outputs/
