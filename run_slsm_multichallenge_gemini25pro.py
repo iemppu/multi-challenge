@@ -73,7 +73,7 @@ underlying_llm = GeminiModel(
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
 with open(OUTPUT_FILE, "w", encoding="utf-8") as fout:
-    for conv in tqdm(conversations[:50], desc=f"Running SLSM-controlled {UNDERLYING_MODEL}"):
+    for conv in tqdm(conversations, desc=f"Running SLSM-controlled {UNDERLYING_MODEL}"):
         messages = conv.conversation
         qid = conv.question_id
 
