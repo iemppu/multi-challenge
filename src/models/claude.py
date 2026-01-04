@@ -80,13 +80,25 @@ class ClaudeModel(ModelProvider):
                 "Prompt must be a string or a list of dictionaries with 'role'/'content'."
             )
 
+        # resp = self.client.messages.create(
+        #     model=self.model,
+        #     temperature=self.temp,
+        #     max_tokens=self.max_tokens,
+        #     system=system_text,
+        #     messages=messages,
+        # )
+        system_blocks = None
+        if system_text:
+            system_blocks = [{"type": "text", "text": system_text}]
+        
         resp = self.client.messages.create(
             model=self.model,
             temperature=self.temp,
             max_tokens=self.max_tokens,
-            system=system_text,
+            system=system_blocks,   # ✅ 必须是 list 或 None
             messages=messages,
         )
+
 
         # SDK returns `content` as a list of blocks; usually first is text.
         # Be defensive across versions.
