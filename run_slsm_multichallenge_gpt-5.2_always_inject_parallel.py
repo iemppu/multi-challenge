@@ -11,7 +11,7 @@ from src.slsm_wrapper import (
     SLSMWrapper,
 )
 
-CONCURRENCY = 5
+CONCURRENCY = 8
 
 # =========================
 # Config
