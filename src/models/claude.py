@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import os
-from typing import Any, List, Dict, Optional, Union
 
 from anthropic import Anthropic
 from src.models.base import ModelProvider
@@ -9,60 +6,58 @@ from src.models.base import ModelProvider
 
 PromptType = Union[str, List[Dict[str, Any]]]
 
-
 class ClaudeModel(ModelProvider):
-    """Anthropic Claude model provider (e.g., claude-sonnet-4.5)."""
 
-    def __init__(
-        self,
-        model: str,
-        temp: float,
-        max_tokens: int = 2048,
-        timeout: Optional[float] = None,
-    ):
-        """
-        Initialize Claude API client.
+    def __init__(self, model, temp, max_tokens=2048, timeout=None):
+        import os
+        from anthropic import Anthropic
 
-        Env:
-            ANTHROPIC_API_KEY: your Anthropic API key
-        """
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY is not set in the environment (.env).")
+            raise ValueError("ANTHROPIC_API_KEY not set")
 
         self.client = Anthropic(api_key=api_key, timeout=timeout)
         self.model = model
-        self.temp = float(temp)
-        self.max_tokens = int(max_tokens)
+        self.temp = temp
+        self.max_tokens = max_tokens
 
     def generate(self, messages):
-        system_text = None
-        filtered_messages = []
+        """
+        messages: list of {role: str, content: str}
+        """
 
-        # messages: list[{"role": ..., "content": ...}]
+        system_text = None
+        claude_messages = []
+
+        # --- split system vs others ---
         for m in messages:
-            if m["role"] == "system":
-                if system_text is None:
-                    system_text = m["content"]
-                else:
-                    system_text += "\n" + m["content"]
+            role = m["role"]
+            text = m.get("content") or ""
+
+            if role == "system":
+                system_text = text if system_text is None else system_text + "\n" + text
             else:
-                filtered_messages.append({
-                    "role": m["role"],
-                    "content": m["content"],
+                claude_messages.append({
+                    "role": role,
+                    "content": [
+                        {"type": "text", "text": text}
+                    ]
                 })
 
         system_blocks = None
         if system_text:
-            system_blocks = [{"type": "text", "text": system_text}]
+            system_blocks = [
+                {"type": "text", "text": system_text}
+            ]
 
         resp = self.client.messages.create(
             model=self.model,
             temperature=self.temp,
             max_tokens=self.max_tokens,
-            system=system_blocks,
-            messages=filtered_messages,
+            system=system_blocks,      # must be list[block] or None
+            messages=claude_messages,  # content must be list[block]
         )
 
+        # canonical extraction
         return resp.content[0].text
 
