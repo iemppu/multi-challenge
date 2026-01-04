@@ -1,0 +1,47 @@
+# IDE / Editor
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+sdist/
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.pytype/
+
+# Misc
+*.log
+*.tmp
+.DS_Store

@@ -1,0 +1,32 @@
+============================================================
+EXPERIMENT CONFIGURATION
+============================================================
+Timestamp: 2026-01-04 18:34:01
+Output file: data/final_model_responses/gpt-4o-2024-08-06_slsm-gpt-4o-mini_openai-exp1.jsonl
+
+[paths]
+  benchmark_file: data/benchmark_questions.jsonl
+  output_file: data/final_model_responses/gpt-4o-2024-08-06_slsm-gpt-4o-mini_openai-exp1.jsonl
+
+[underlying_model]
+  provider: openai
+  name: gpt-4o-2024-08-06
+  temperature: 0.0
+
+[controller_model]
+  provider: openai
+  name: gpt-4o-mini
+  temperature: 0.0
+
+[slsm]
+  enabled: True
+  inject: on_risk
+  risk_modes: ['verify', 'clarify']
+  note_max_items: 6
+  gate_facts_by_evidence: True
+
+[run]
+  num_samples: 20
+  total_conversations: 20
+  tag: openai-exp1
+

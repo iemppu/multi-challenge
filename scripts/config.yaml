@@ -1,0 +1,54 @@
+# =============================================================================
+# SLSM Multi-Challenge Configuration
+# =============================================================================
+
+# --- Paths ---
+paths:
+  benchmark_file: "data/benchmark_questions.jsonl"
+  output_dir: "data/final_model_responses"
+  eval_output_dir: "outputs"
+
+# --- Model Configuration ---
+models:
+  # Underlying model (the model being tested)
+  underlying:
+    provider: "openai"          # openai | gemini
+    name: "gpt-4o-2024-08-06"
+    temperature: 0.0
+
+  # Controller model (cheap model for state tracking)
+  controller:
+    provider: "openai"
+    name: "gpt-4o-mini"
+    temperature: 0.0
+
+# --- SLSM Configuration ---
+slsm:
+  # Injection policy: never | on_risk | always
+  inject: "on_risk"
+  # Risk modes that trigger injection when inject=on_risk
+  risk_modes: ["verify", "clarify"]
+  # Max items in memory note
+  note_max_items: 6
+  # Controller max tokens
+  controller_max_tokens: 1200
+  # Gate facts by evidence (strict grounding check)
+  gate_facts_by_evidence: true
+
+# --- Run Configuration ---
+run:
+  # Number of samples to process (null = all)
+  num_samples: 20
+  # Skip if output file exists
+  skip_existing: true
+  # Enable SLSM wrapper (false = baseline run)
+  enable_slsm: true
+  # Experiment tag for output filename (e.g., exp1, test, v2)
+  tag: openai-exp1
+
+# --- Evaluation Configuration ---
+evaluation:
+  # Number of parallel workers for judge evaluation
+  workers: 1
+  # Number of judge attempts per sample
+  attempts: 1
