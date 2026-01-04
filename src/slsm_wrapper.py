@@ -155,7 +155,7 @@ class SLSMConfig:
     controller_max_tokens: int = 1200
 
     # Injection policy: how much we perturb the final underlying prompt
-    inject: Literal["never", "on_risk", "always"] = "on_risk"
+    inject: Literal["never", "on_risk", "always", "on_detection"] = "on_risk"
     # Define what counts as "risk" that warrants injection
     risk_modes: tuple = ("verify", "clarify")
 
