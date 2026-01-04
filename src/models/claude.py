@@ -35,37 +35,37 @@ class ClaudeModel(ModelProvider):
         self.temp = float(temp)
         self.max_tokens = int(max_tokens)
 
-def generate(self, prompt):
-    system_text = None
-    messages = []
-
-    if isinstance(prompt, str):
-        messages = [{"role": "user", "content": prompt}]
-    else:
-        system_parts = []
-        for m in prompt:
-            if m["role"] == "system":
-                system_parts.append(m["content"])
-            else:
-                messages.append({
-                    "role": m["role"],
-                    "content": m["content"],
-                })
-
-        if system_parts:
-            system_text = "\n".join(system_parts)
-
-    system_blocks = None
-    if system_text:
-        system_blocks = [{"type": "text", "text": system_text}]
-
-    resp = self.client.messages.create(
-        model=self.model,
-        temperature=self.temp,
-        max_tokens=self.max_tokens,
-        system=system_blocks,
-        messages=messages,   # 🔥 这里已经保证没有 system
-    )
-
-    return resp.content[0].text
+    def generate(self, prompt):
+        system_text = None
+        messages = []
+    
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            system_parts = []
+            for m in prompt:
+                if m["role"] == "system":
+                    system_parts.append(m["content"])
+                else:
+                    messages.append({
+                        "role": m["role"],
+                        "content": m["content"],
+                    })
+    
+            if system_parts:
+                system_text = "\n".join(system_parts)
+    
+        system_blocks = None
+        if system_text:
+            system_blocks = [{"type": "text", "text": system_text}]
+    
+        resp = self.client.messages.create(
+            model=self.model,
+            temperature=self.temp,
+            max_tokens=self.max_tokens,
+            system=system_blocks,
+            messages=messages,   # 🔥 这里已经保证没有 system
+        )
+    
+        return resp.content[0].text
 
