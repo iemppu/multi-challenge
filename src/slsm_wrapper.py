@@ -2,10 +2,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Protocol
-import json
+import json, re
 import inspect
 
 Role = Literal["system", "user", "assistant"]
+
+def _parse_json_obj(text: str) -> dict:
+    m = re.search(r"\{.*\}", text, flags=re.S)
+    if not m:
+        return {}
+    return json.loads(m.group(0))
+
 
 class LLM(Protocol):
     """Model-agnostic interface."""
@@ -296,6 +303,7 @@ class SLSMWrapper:
         original_conversation: List[Dict[str, str]],
         state: SemanticState,
         system_prompt: Optional[str] = None,
+        inject_override: Optional[bool] = None,   # NEW
     ) -> List[Dict[str, str]]:
         """
         Returns messages to send to the underlying LLM for final response.
@@ -307,12 +315,15 @@ class SLSMWrapper:
     
         inject_note = False
         mode = (state.plan or {}).get("mode", "proceed")
-        if self.cfg.inject == "always":
-            inject_note = True
-        elif self.cfg.inject == "on_risk" and mode in self.cfg.risk_modes:
-            inject_note = True
-        elif self.cfg.inject == "never":
-            inject_note = False
+        if inject_override is not None:
+            inject_note = inject_override
+        else:
+            if self.cfg.inject == "always":
+                inject_note = True
+            elif self.cfg.inject == "on_risk" and mode in self.cfg.risk_modes:
+                inject_note = True
+            elif self.cfg.inject == "never":
+                inject_note = False
     
         if inject_note:
             # --- Evidence-gated facts: only inject facts that can be grounded to the conversation ---
@@ -376,6 +387,69 @@ class SLSMWrapper:
         Main entry: track state, then generate final response from underlying model.
         """
         state = self.track_state(original_conversation)
-        msgs = self.build_final_messages(original_conversation, state, system_prompt=system_prompt)
-        # return underlying_llm.generate(msgs, **gen_kwargs)
-        return _safe_generate(underlying_llm, msgs, **gen_kwargs)
+
+        # ---- (A) default behavior: keep your old logic ----
+        if self.cfg.inject != "on_detection":
+            msgs = self.build_final_messages(
+                original_conversation, state, system_prompt=system_prompt
+            )
+            return _safe_generate(underlying_llm, msgs, **gen_kwargs)
+
+        # ---- (B) on_detection: two-pass ----
+        
+        # pass 0: no-memory / no-injection
+        msgs0 = self.build_final_messages(
+            original_conversation, state, system_prompt=system_prompt, inject_override=False
+        )
+        y0 = _safe_generate(underlying_llm, msgs0, **gen_kwargs)
+    
+        # build injected note (but do NOT generate yet)
+        msgs1 = self.build_final_messages(
+            original_conversation, state, system_prompt=system_prompt, inject_override=True
+        )
+    
+        # extract the SLSM note text (system message that starts with [SLSM MEMORY NOTE])
+        state_note = ""
+        for m in msgs1:
+            if m.get("role") == "system" and (m.get("content") or "").startswith("[SLSM MEMORY NOTE]"):
+                state_note = m["content"]
+                break
+    
+        # if no note exists, nothing to inject; return y0
+        if not state_note:
+            return y0
+    
+        # mismatch decision based only on (S_T note, y0)
+        if self._detect_mismatch(state_note, y0):
+            y1 = _safe_generate(underlying_llm, msgs1, **gen_kwargs)
+            return y1
+    
+        return y0
+
+
+    def _detect_mismatch(self, state_note: str, y0: str) -> bool:
+        """
+        Minimal mismatch: controller verifies whether y0 violates the constraints
+        in the SLSM MEMORY NOTE. Only depends on (S_T, y0).
+        """
+        prompt = f"""
+You are a strict verifier.
+
+SLSM MEMORY NOTE:
+{state_note}
+
+Candidate answer y0:
+{y0}
+
+Return ONLY JSON:
+{{"mismatch": true/false}}
+
+Definition:
+mismatch=true iff y0 clearly violates any constraint / required fix in the note,
+or clearly fails to follow an explicit format constraint (e.g., word/sentence limits).
+Be conservative.
+"""
+        # IMPORTANT: use the controller's LLM (temp=0)
+        out = self.controller.llm.generate([{"role":"user","content":prompt}])  # adjust attribute name if needed
+        obj = _parse_json_obj(out)
+        return bool(obj.get("mismatch", False))
