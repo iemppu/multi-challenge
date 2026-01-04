@@ -1,6 +1,7 @@
 # src/models/gemini.py
 import os
 from typing import List, Dict, Any, Optional
+from google.genai.types import HttpOptions
 
 class GeminiModel:
     """
@@ -22,7 +23,8 @@ class GeminiModel:
         try:
             from google import genai  # google-genai
             self._genai = genai
-            self._client = genai.Client(api_key=self.api_key)
+            # self._client = genai.Client(api_key=self.api_key)
+            self._client = genai.Client(api_key=self.api_key, http_options=HttpOptions(api_version="v1"))
             self._client_type = "google-genai"
         except Exception:
             self._genai = None
