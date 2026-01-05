@@ -18,7 +18,7 @@ from src.slsm_wrapper import (
 CONCURRENCY = 8
 
 BENCHMARK_FILE = "data/benchmark_questions.jsonl"
-OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gemini-2.5-flash-lite_always.jsonl"
+OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gemini-2.5-flash_always.jsonl"
 
 UNDERLYING_MODEL = "gemini-2.5-pro"
 CONTROLLER_MODEL = "gemini-2.5-flash" 
