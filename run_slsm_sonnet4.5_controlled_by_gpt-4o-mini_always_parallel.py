@@ -20,7 +20,7 @@ from src.slsm_wrapper import (
 CONCURRENCY = 8
 
 BENCHMARK_FILE = "data/benchmark_questions.jsonl"
-OUTPUT_FILE = "data/final_model_responses/sonnet-4.5_slsm-haiku-4.5_always.jsonl"
+OUTPUT_FILE = "data/final_model_responses/sonnet-4.5_slsm-gpt-4o-mini_always.jsonl"
 
 UNDERLYING_MODEL = "claude-sonnet-4-5-20250929"
 CONTROLLER_MODEL = "gpt-4o-mini" 
