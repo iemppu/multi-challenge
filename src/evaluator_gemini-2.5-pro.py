@@ -29,9 +29,9 @@ class Evaluator:
     def __init__(self, conversations: List[Any], responses: Dict[int, List[str]]):
         self.conversations = conversations
         self.responses = responses
-        self.evaluation_model = OpenAIModel(
+        self.evaluation_model = GeminiModel(
             # model="gpt-4o-2024-08-06", 
-            model="gemini-2.5-pro"
+            model="gemini-2.5-pro",
             temp=0, 
             # max_tokens=4096, # by yan
             response_format=JudgeResponse
