@@ -52,7 +52,7 @@ print(f"Loaded {len(conversations)} conversations")
 controller_llm = OpenAIModel(
     model=CONTROLLER_MODEL,
     temp=0,
-    max_tokens=2048,
+    # max_tokens=2048,
 )
 
 cfg = SLSMConfig(
