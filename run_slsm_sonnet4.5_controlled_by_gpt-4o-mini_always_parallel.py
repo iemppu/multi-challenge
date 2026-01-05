@@ -6,7 +6,7 @@ from tqdm.asyncio import tqdm_asyncio
 
 from src.data_loader import DataLoader
 from src.models.claude import ClaudeModel
-from src.models.claude import OpenAIModel
+from src.models.openai import OpenAIModel
 
 from src.slsm_wrapper import (
     SLSMConfig,
