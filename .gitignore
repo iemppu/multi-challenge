@@ -31,6 +31,8 @@ venv/
 ENV/
 
 # Testing
+trash/
+logs/
 .pytest_cache/
 .coverage
 htmlcov/

@@ -1,0 +1,56 @@
+# =============================================================================
+# SLSM Multi-Challenge Configuration - OpenRouter
+# =============================================================================
+# This config mirrors config.yaml but uses OpenRouter as the provider.
+# Used to verify OpenRouter produces equivalent results to direct OpenAI calls.
+#
+# Set OPENROUTER_API_KEY in your .env file.
+# =============================================================================
+
+# --- Paths ---
+paths:
+  benchmark_file: "data/benchmark_questions.jsonl"
+  output_dir: "data/final_model_responses"
+  eval_output_dir: "outputs"
+
+# --- Model Configuration ---
+models:
+  # Underlying model (same as config.yaml, via OpenRouter)
+  underlying:
+    provider: "openrouter"
+    name: "openai/gpt-4o-2024-08-06"
+    temperature: 0.0
+    # Reproducibility settings (OpenAI best-effort, not guaranteed)
+    seed: 42
+    top_p: 1.0
+
+  # Controller model (same as config.yaml, via OpenRouter)
+  controller:
+    provider: "openrouter"
+    name: "openai/gpt-4o-mini"
+    temperature: 0.0
+    # Controller typically doesn't need reproducibility settings
+    # seed: null
+    # top_p: null
+
+# --- SLSM Configuration (same as config.yaml) ---
+slsm:
+  inject: "on_risk"
+  risk_modes: ["verify", "clarify"]
+  note_max_items: 6
+  controller_max_tokens: 1200
+  gate_facts_by_evidence: true
+
+# --- Run Configuration ---
+run:
+  num_samples: null
+  skip_existing: true
+  enable_slsm: true
+  tag: openrouter-gpt4o-exp1-273
+  parallel: true
+  num_workers: 8
+
+# --- Evaluation Configuration ---
+evaluation:
+  workers: 1
+  attempts: 1

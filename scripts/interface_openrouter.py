@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-SLSM Multi-Challenge Command Line Interface
+SLSM Multi-Challenge CLI - OpenRouter Provider
+
+Mirrors interface.py but uses OpenRouter as the provider.
+Reads configuration from config_openrouter.yaml.
 
 Usage:
-    python scripts/interface.py run --config scripts/config.yaml
-    python scripts/interface.py run --num-samples 10
-    python scripts/interface.py run --parallel true --num-workers 4
-    python scripts/interface.py eval --responses data/final_model_responses/xxx.jsonl
-    python scripts/interface.py test --index 0
+    python scripts/interface_openrouter.py run --config scripts/config_openrouter.yaml
+    python scripts/interface_openrouter.py run --num-samples 10 --parallel true
+    python scripts/interface_openrouter.py test --model openai/gpt-4o-mini
 """
 
 import argparse
 import json
 import os
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 from dotenv import load_dotenv
@@ -39,7 +39,7 @@ PROJECT_ROOT = setup_project_path()
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration from YAML file."""
     if config_path is None:
-        config_path = PROJECT_ROOT / "scripts" / "config.yaml"
+        config_path = PROJECT_ROOT / "scripts" / "config_openrouter.yaml"
     else:
         config_path = Path(config_path)
 
@@ -61,42 +61,27 @@ def load_env():
         print(f"WARNING: .env file not found at {env_path}")
 
 
-def get_model_provider(
-    provider: str,
+def get_openrouter_model(
     model_name: str,
     temperature: float,
     seed: Optional[int] = None,
     top_p: Optional[float] = None,
 ):
-    """Create model provider instance based on configuration.
-
-    Args:
-        provider: Provider name (openai, gemini, openrouter)
-        model_name: Model name/ID
-        temperature: Temperature for generation
-        seed: Optional seed for reproducibility
-        top_p: Optional top_p for nucleus sampling
-    """
-    if provider == "openai":
-        from src.models.openai import OpenAIModel
-        return OpenAIModel(model=model_name, temp=temperature, seed=seed, top_p=top_p)
-    elif provider == "gemini":
-        from src.models.gemini import GeminiModel
-        # Note: Gemini may not support seed/top_p in the same way
-        return GeminiModel(model=model_name, temp=temperature)
-    elif provider == "openrouter":
-        from src.models.openrouter import OpenRouterModel
-        return OpenRouterModel(model=model_name, temp=temperature, seed=seed, top_p=top_p)
-    else:
-        raise ValueError(f"Unknown provider: {provider}. Supported: openai, gemini, openrouter")
+    """Create OpenRouter model instance."""
+    from src.models.openrouter import OpenRouterModel
+    return OpenRouterModel(model=model_name, temp=temperature, seed=seed, top_p=top_p)
 
 
 def build_output_filename(underlying_model: str, controller_model: str, enable_slsm: bool, tag: str = None) -> str:
-    """Build output filename based on model names and optional tag."""
+    """Build output filename based on model names."""
+    # Sanitize model names for filename (replace / with -)
+    underlying_safe = underlying_model.replace("/", "-")
+    controller_safe = controller_model.replace("/", "-")
+
     if enable_slsm:
-        base = f"{underlying_model}_slsm-{controller_model}"
+        base = f"{underlying_safe}_slsm-{controller_safe}"
     else:
-        base = f"{underlying_model}_baseline"
+        base = f"{underlying_safe}_baseline"
 
     if tag:
         base = f"{base}_{tag}"
@@ -109,10 +94,11 @@ def save_experiment_config(output_file: str, config: Dict[str, Any]):
     from datetime import datetime
 
     config_file = output_file.replace(".jsonl", ".txt")
+    os.makedirs(os.path.dirname(config_file), exist_ok=True)
 
     with open(config_file, "w", encoding="utf-8") as f:
         f.write("=" * 60 + "\n")
-        f.write("EXPERIMENT CONFIGURATION\n")
+        f.write("EXPERIMENT CONFIGURATION (OpenRouter)\n")
         f.write("=" * 60 + "\n")
         f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Output file: {output_file}\n")
@@ -131,7 +117,7 @@ def save_experiment_config(output_file: str, config: Dict[str, Any]):
 
 
 def cmd_run(args, cfg: Dict[str, Any]):
-    """Run SLSM benchmark."""
+    """Run SLSM benchmark with OpenRouter."""
     from src.data_loader import DataLoader
     from src.slsm_wrapper import SLSMConfig, SLSMController, SLSMWrapper
 
@@ -149,20 +135,18 @@ def cmd_run(args, cfg: Dict[str, Any]):
 
     # Parallel configuration
     parallel = args.parallel if args.parallel is not None else run_cfg.get("parallel", False)
-    num_workers = args.num_workers if args.num_workers is not None else run_cfg.get("num_workers", 4)
+    num_workers = args.num_workers if args.num_workers is not None else run_cfg.get("num_workers", 3)
 
     # Model configuration (CLI args override yaml config)
     underlying_cfg = models_cfg.get("underlying", {})
     controller_cfg = models_cfg.get("controller", {})
 
-    underlying_provider = args.underlying_provider or underlying_cfg.get("provider", "openai")
-    underlying_model = args.underlying_model or underlying_cfg.get("name", "gpt-4o-2024-08-06")
+    underlying_model = args.underlying_model or underlying_cfg.get("name", "openai/gpt-4o-2024-08-06")
     underlying_temp = args.underlying_temp if args.underlying_temp is not None else underlying_cfg.get("temperature", 0.0)
     underlying_seed = args.seed if args.seed is not None else underlying_cfg.get("seed")
     underlying_top_p = args.top_p if args.top_p is not None else underlying_cfg.get("top_p")
 
-    controller_provider = args.controller_provider or controller_cfg.get("provider", "openai")
-    controller_model = args.controller_model or controller_cfg.get("name", "gpt-4o-mini")
+    controller_model = args.controller_model or controller_cfg.get("name", "openai/gpt-4o-mini")
     controller_temp = args.controller_temp if args.controller_temp is not None else controller_cfg.get("temperature", 0.0)
     controller_seed = controller_cfg.get("seed")  # Controller usually doesn't need seed
     controller_top_p = controller_cfg.get("top_p")
@@ -194,20 +178,20 @@ def cmd_run(args, cfg: Dict[str, Any]):
         print(f"Processing first {num_samples} samples")
 
     # Create models
-    print(f"Underlying model: {underlying_provider}/{underlying_model}")
+    print(f"Underlying model (OpenRouter): {underlying_model}")
     if underlying_seed is not None:
         print(f"  seed={underlying_seed}, top_p={underlying_top_p}")
-    underlying_llm = get_model_provider(
-        underlying_provider, underlying_model, underlying_temp,
+    underlying_llm = get_openrouter_model(
+        underlying_model, underlying_temp,
         seed=underlying_seed, top_p=underlying_top_p
     )
 
     # Setup SLSM wrapper if enabled
     wrapper = None
     if enable_slsm:
-        print(f"Controller model: {controller_provider}/{controller_model}")
-        controller_llm = get_model_provider(
-            controller_provider, controller_model, controller_temp,
+        print(f"Controller model (OpenRouter): {controller_model}")
+        controller_llm = get_openrouter_model(
+            controller_model, controller_temp,
             seed=controller_seed, top_p=controller_top_p
         )
 
@@ -235,14 +219,14 @@ def cmd_run(args, cfg: Dict[str, Any]):
             "output_file": output_file,
         },
         "underlying_model": {
-            "provider": underlying_provider,
+            "provider": "openrouter",
             "name": underlying_model,
             "temperature": underlying_temp,
             "seed": underlying_seed,
             "top_p": underlying_top_p,
         },
         "controller_model": {
-            "provider": controller_provider,
+            "provider": "openrouter",
             "name": controller_model,
             "temperature": controller_temp,
             "seed": controller_seed,
@@ -283,8 +267,8 @@ def cmd_run(args, cfg: Dict[str, Any]):
         try:
             if enable_slsm:
                 # Create per-thread SLSM wrapper to avoid state conflicts
-                thread_controller_llm = get_model_provider(
-                    controller_provider, controller_model, controller_temp,
+                thread_controller_llm = get_openrouter_model(
+                    controller_model, controller_temp,
                     seed=controller_seed, top_p=controller_top_p
                 )
                 thread_slsm_config = SLSMConfig(
@@ -308,7 +292,7 @@ def cmd_run(args, cfg: Dict[str, Any]):
         return qid, response
 
     # Run benchmark
-    desc = "Running SLSM" if enable_slsm else "Running baseline"
+    desc = "Running SLSM (OpenRouter)" if enable_slsm else "Running baseline (OpenRouter)"
     results = []
 
     if parallel and num_workers > 1:
@@ -345,8 +329,30 @@ def cmd_run(args, cfg: Dict[str, Any]):
     print(f"\nDone. Results saved to: {output_file}")
 
 
+def cmd_test(args):
+    """Test OpenRouter connection with a simple prompt."""
+    from src.models.openrouter import OpenRouterModel
+
+    model_name = args.model or "openai/gpt-4o-mini"
+    seed = getattr(args, 'seed', None)
+    top_p = getattr(args, 'top_p', None)
+    print(f"Testing OpenRouter with model: {model_name}")
+    if seed is not None:
+        print(f"  seed={seed}, top_p={top_p}")
+
+    try:
+        model = OpenRouterModel(model=model_name, temp=0.0, seed=seed, top_p=top_p)
+        response = model.generate("Say 'Hello from OpenRouter!' in exactly 5 words.")
+        print(f"Success! Response: {response}")
+        print(f"Model info: {model.get_model_info()}")
+    except Exception as e:
+        print(f"Failed: {e}")
+
+
 def cmd_eval(args, cfg: Dict[str, Any]):
     """Run judge evaluation on responses."""
+    import subprocess
+
     eval_cfg = cfg.get("evaluation", {})
     paths_cfg = cfg.get("paths", {})
 
@@ -379,10 +385,13 @@ def cmd_eval(args, cfg: Dict[str, Any]):
         with open(out_json, "r", encoding="utf-8") as f:
             results = json.load(f)
 
-        # Filter out invalid results (missing responses)
-        valid_results = [r for r in results if not r.get("reasoning", "").startswith("NA - Question ID")]
-        if len(valid_results) < len(results):
-            print(f"Filtered results: {len(results)} -> {len(valid_results)} (removed missing responses)")
+        # Filter out invalid results (missing responses) if skip_missing is enabled
+        if getattr(args, 'skip_missing', True):
+            valid_results = [r for r in results if not r.get("reasoning", "").startswith("NA - Question ID")]
+            if len(valid_results) < len(results):
+                print(f"Filtered results: {len(results)} -> {len(valid_results)} (removed missing responses)")
+        else:
+            valid_results = results
 
         rp = ResultParser(valid_results)
         scores = rp.calculate_scores()
@@ -398,8 +407,6 @@ def cmd_eval(args, cfg: Dict[str, Any]):
         return
 
     # Run evaluation via subprocess
-    # Use --skip_missing to only evaluate questions that have responses
-    import subprocess
     cmd = [
         sys.executable, "-m", "run_judge_eval",
         "--responses", responses_file,
@@ -407,8 +414,10 @@ def cmd_eval(args, cfg: Dict[str, Any]):
         "--out_csv", out_csv,
         "--workers", str(workers),
         "--attempts", str(attempts),
-        "--skip_missing",  # Only evaluate questions with responses (subset evaluation)
     ]
+    # Add --skip_missing if enabled (default: True)
+    if getattr(args, 'skip_missing', True):
+        cmd.append("--skip_missing")
 
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
@@ -420,112 +429,6 @@ def cmd_eval(args, cfg: Dict[str, Any]):
         print(f"  Scores: {out_scores}")
     else:
         print(f"\nEvaluation failed with code {result.returncode}")
-
-
-def cmd_test(args, cfg: Dict[str, Any]):
-    """Test SLSM on a single conversation."""
-    from src.data_loader import DataLoader
-    from src.slsm_wrapper import SLSMConfig, SLSMController, SLSMWrapper
-
-    paths_cfg = cfg.get("paths", {})
-    models_cfg = cfg.get("models", {})
-    slsm_cfg = cfg.get("slsm", {})
-
-    benchmark_file = paths_cfg.get("benchmark_file", "data/benchmark_questions.jsonl")
-
-    # Load benchmark
-    dl = DataLoader(input_file=benchmark_file)
-    dl.load_data()
-    conversations = dl.get_conversations()
-
-    # Get conversation
-    index = args.index
-    if index >= len(conversations):
-        print(f"ERROR: Index {index} out of range (max {len(conversations) - 1})")
-        return
-
-    conv = conversations[index]
-    messages = conv.conversation
-
-    print("=" * 60)
-    print(f"Conversation {index} (ID: {conv.question_id})")
-    print(f"Axis: {conv.axis}")
-    print("=" * 60)
-
-    # Print conversation
-    for i, m in enumerate(messages):
-        role = m.get("role", "unknown")
-        content = m.get("content", "")
-        preview = content if len(content) <= 300 else content[:300] + "..."
-        print(f"\n[Turn {i}] {role.upper()}:")
-        print(preview)
-
-    print("\n" + "=" * 60)
-
-    # Get model configuration
-    underlying_cfg = models_cfg.get("underlying", {})
-    controller_cfg = models_cfg.get("controller", {})
-
-    underlying_llm = get_model_provider(
-        underlying_cfg.get("provider", "openai"),
-        underlying_cfg.get("name", "gpt-4o-2024-08-06"),
-        underlying_cfg.get("temperature", 0.0),
-    )
-
-    controller_llm = get_model_provider(
-        controller_cfg.get("provider", "openai"),
-        controller_cfg.get("name", "gpt-4o-mini"),
-        controller_cfg.get("temperature", 0.0),
-    )
-
-    # Create SLSM wrapper
-    slsm_config = SLSMConfig(
-        inject="always",  # Force injection for testing
-        note_max_items=slsm_cfg.get("note_max_items", 6),
-    )
-
-    controller = SLSMController(controller_llm, slsm_config)
-    wrapper = SLSMWrapper(controller, slsm_config)
-
-    # Generate responses
-    print("\nGenerating baseline response...")
-    baseline_resp = underlying_llm.generate(messages)
-
-    print("Generating SLSM response...")
-    slsm_resp = wrapper.generate_last_turn(
-        underlying_llm=underlying_llm,
-        original_conversation=messages,
-    )
-
-    # Inspect state
-    state = wrapper.track_state(messages)
-
-    print("\n" + "=" * 60)
-    print("BASELINE RESPONSE:")
-    print("=" * 60)
-    print(baseline_resp[:800] if len(baseline_resp) > 800 else baseline_resp)
-
-    print("\n" + "=" * 60)
-    print("SLSM RESPONSE:")
-    print("=" * 60)
-    print(slsm_resp[:800] if len(slsm_resp) > 800 else slsm_resp)
-
-    print("\n" + "=" * 60)
-    print("SLSM STATE:")
-    print("=" * 60)
-    print(f"Facts: {len(state.facts)}")
-    for f in state.facts[:3]:
-        print(f"  - {f.get('text', '')[:100]}")
-    print(f"Constraints: {len(state.constraints)}")
-    for c in state.constraints[:3]:
-        print(f"  - [{c.get('status', '')}] {c.get('text', '')[:100]}")
-    print(f"Plan mode: {state.plan.get('mode', 'unknown')}")
-
-    print("\n" + "=" * 60)
-    print("MEMORY NOTE (injected):")
-    print("=" * 60)
-    note = state.to_compact_note()
-    print(note if note else "(empty)")
 
 
 def cmd_compare(args, cfg: Dict[str, Any]):
@@ -600,11 +503,19 @@ def cmd_compare(args, cfg: Dict[str, Any]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SLSM Multi-Challenge CLI",
+        description="SLSM Multi-Challenge CLI - OpenRouter Provider",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Available models (examples):
+  openai/gpt-4o-2024-08-06    GPT-4o
+  openai/gpt-4o-mini          GPT-4o Mini (cheap)
+  google/gemini-2.0-flash-001 Gemini 2.0 Flash (fast & cheap)
+  google/gemini-2.5-flash     Gemini 2.5 Flash
+  anthropic/claude-3.5-sonnet Claude 3.5 Sonnet
+        """
     )
     parser.add_argument("--config", "-c", type=str, default=None,
-                        help="Path to config YAML file")
+                        help="Path to config YAML file (default: scripts/config_openrouter.yaml)")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -614,19 +525,23 @@ def main():
     run_parser.add_argument("--output", "-o", type=str, help="Output file path")
     run_parser.add_argument("--output-dir", type=str, help="Output directory")
     run_parser.add_argument("--num-samples", "-n", type=int, help="Number of samples to process")
-    run_parser.add_argument("--underlying-provider", type=str, help="Underlying model provider")
-    run_parser.add_argument("--underlying-model", type=str, help="Underlying model name")
+    run_parser.add_argument("--underlying-model", type=str, help="Underlying model (e.g., openai/gpt-4o-2024-08-06)")
     run_parser.add_argument("--underlying-temp", type=float, help="Underlying model temperature")
-    run_parser.add_argument("--controller-provider", type=str, help="Controller model provider")
-    run_parser.add_argument("--controller-model", type=str, help="Controller model name")
+    run_parser.add_argument("--controller-model", type=str, help="Controller model (e.g., openai/gpt-4o-mini)")
     run_parser.add_argument("--controller-temp", type=float, help="Controller model temperature")
     run_parser.add_argument("--enable-slsm", type=lambda x: x.lower() == "true", help="Enable SLSM wrapper")
-    run_parser.add_argument("--tag", "-t", type=str, help="Experiment tag for output filename (e.g., exp1, test, v2)")
+    run_parser.add_argument("--tag", "-t", type=str, help="Experiment tag for output filename")
     run_parser.add_argument("--force", "-f", action="store_true", help="Force overwrite existing output")
     run_parser.add_argument("--parallel", "-p", type=lambda x: x.lower() == "true", help="Enable parallel processing")
     run_parser.add_argument("--num-workers", "-w", type=int, help="Number of parallel workers")
     run_parser.add_argument("--seed", "-s", type=int, help="Random seed for reproducibility (e.g., 42)")
     run_parser.add_argument("--top-p", type=float, help="Top-p (nucleus sampling) value (e.g., 1.0)")
+
+    # --- test command ---
+    test_parser = subparsers.add_parser("test", help="Test OpenRouter connection")
+    test_parser.add_argument("--model", "-m", type=str, help="Model to test")
+    test_parser.add_argument("--seed", "-s", type=int, help="Random seed for reproducibility")
+    test_parser.add_argument("--top-p", type=float, help="Top-p (nucleus sampling) value")
 
     # --- eval command ---
     eval_parser = subparsers.add_parser("eval", help="Run judge evaluation")
@@ -634,10 +549,10 @@ def main():
     eval_parser.add_argument("--output-dir", type=str, help="Output directory")
     eval_parser.add_argument("--workers", "-w", type=int, help="Number of parallel workers")
     eval_parser.add_argument("--attempts", "-a", type=int, help="Number of judge attempts")
-
-    # --- test command ---
-    test_parser = subparsers.add_parser("test", help="Test SLSM on single conversation")
-    test_parser.add_argument("--index", "-i", type=int, default=0, help="Conversation index")
+    eval_parser.add_argument("--skip-missing", action="store_true", default=False,
+                             help="Skip questions without responses (calculate score over subset)")
+    eval_parser.add_argument("--no-skip-missing", dest="skip_missing", action="store_false",
+                             help="Count missing responses as failures (default, use full 273 as denominator)")
 
     # --- compare command ---
     compare_parser = subparsers.add_parser("compare", help="Compare two result CSVs")
@@ -657,10 +572,10 @@ def main():
     # Dispatch command
     if args.command == "run":
         cmd_run(args, cfg)
+    elif args.command == "test":
+        cmd_test(args)
     elif args.command == "eval":
         cmd_eval(args, cfg)
-    elif args.command == "test":
-        cmd_test(args, cfg)
     elif args.command == "compare":
         cmd_compare(args, cfg)
     else:

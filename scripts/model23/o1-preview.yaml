@@ -1,0 +1,49 @@
+# =============================================================================
+# SLSM Multi-Challenge Configuration - o1-preview
+# =============================================================================
+# Table 2/3 Frontier Model
+# =============================================================================
+
+# --- Paths ---
+paths:
+  benchmark_file: "data/benchmark_questions.jsonl"
+  output_dir: "data/final_model_responses"
+  eval_output_dir: "outputs"
+
+# --- Model Configuration ---
+models:
+  # Underlying model
+  underlying:
+    provider: "openrouter"
+    name: "openai/o1-preview"
+    temperature: 0.0
+    seed: 42
+    top_p: 1.0
+
+  # Controller model
+  controller:
+    provider: "openrouter"
+    name: "openai/gpt-4o-mini"
+    temperature: 0.0
+
+# --- SLSM Configuration ---
+slsm:
+  inject: "on_risk"
+  risk_modes: ["verify", "clarify"]
+  note_max_items: 6
+  controller_max_tokens: 1200
+  gate_facts_by_evidence: true
+
+# --- Run Configuration ---
+run:
+  num_samples: null
+  skip_existing: true
+  enable_slsm: true
+  tag: o1-preview
+  parallel: true
+  num_workers: 4
+
+# --- Evaluation Configuration ---
+evaluation:
+  workers: 1
+  attempts: 1

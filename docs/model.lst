@@ -1,0 +1,36 @@
+# MultiChallenge Baseline Models - OpenRouter IDs
+# Based on baseline_model_lst.md and openrouter_analysis.md
+
+## Frontier Models (Human Evaluated - Table 2 & Auto Evaluated - Table 3)
+# Model Name                    | OpenRouter Model ID
+GPT-4o (August 2024)            | openai/gpt-4o-2024-08-06
+Llama 3.1 405B Instruct         | meta-llama/llama-3.1-405b-instruct
+Mistral Large                   | mistralai/mistral-large-latest
+Claude 3.5 Sonnet (June 2024)   | anthropic/claude-3.5-sonnet
+Gemini 1.5 Pro                  | google/gemini-pro-1.5
+o1-preview                      | openai/o1-preview
+
+## Open Source Models (Auto Evaluated - Table 5)
+# Model Name                    | OpenRouter Model ID
+Llama-3.2-3B-Instruct           | meta-llama/llama-3.2-3b-instruct
+Llama-3.3-70B-Instruct          | meta-llama/llama-3.3-70b-instruct
+Qwen2-72B-Instruct              | qwen/qwen-2-72b-instruct
+Qwen2.5-14B-Instruct            | qwen/qwen2.5-14b-instruct
+Qwen2.5-72B-Instruct            | qwen/qwen2.5-72b-instruct
+Mixtral-8x7B-Instruct-v0.1      | mistralai/mixtral-8x7b-instruct
+Mixtral-8x22B-Instruct-v0.1     | mistralai/mixtral-8x22b-instruct
+
+## Quick Reference (OpenRouter IDs only)
+openai/gpt-4o-2024-08-06
+meta-llama/llama-3.1-405b-instruct
+mistralai/mistral-large-latest
+anthropic/claude-3.5-sonnet
+google/gemini-pro-1.5
+openai/o1-preview
+meta-llama/llama-3.2-3b-instruct
+meta-llama/llama-3.3-70b-instruct
+qwen/qwen-2-72b-instruct
+qwen/qwen2.5-14b-instruct
+qwen/qwen2.5-72b-instruct
+mistralai/mixtral-8x7b-instruct
+mistralai/mixtral-8x22b-instruct
