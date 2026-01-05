@@ -293,7 +293,7 @@ FLAT_CONTROLLER_SYSTEM = (
     "Output ONLY valid JSON. No extra text."
 )
 
-def _flatmem_summary_prompt(
+def _flat_controller_prompt(
     history: List[Dict[str, str]],
     new_msg: Dict[str, str],
     prev_summary: Optional[str],
