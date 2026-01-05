@@ -293,30 +293,22 @@ FLAT_CONTROLLER_SYSTEM = (
     "Output ONLY valid JSON. No extra text."
 )
 
-def _flat_controller_prompt(
+def _flatmem_summary_prompt(
     history: List[Dict[str, str]],
     new_msg: Dict[str, str],
-    prev_state: Optional[Dict[str, Any]],
-    max_bullets: int = 12,
+    prev_summary: Optional[str],
+    max_chars: int = 600,
 ) -> str:
-    prev_state_json = json.dumps(prev_state or {}, ensure_ascii=False)
-
     hist_txt = "\n\n".join(
         f"{m['role'].upper()}: {m.get('content','')}" for m in history
     )
     new_txt = f"{new_msg['role'].upper()}: {new_msg.get('content','')}"
 
-    schema = {
-        "memory_text": "string",
-        "plan": {"mode": "proceed|verify|clarify", "reasons": ["..."]},
-        "mismatch": "true|false  # true iff the candidate answer violates any clearly stated constraint or misses a required fix"
-    }
-
     return f"""
-You will maintain a FLAT, NON-STRUCTURED semantic memory.
+You maintain a running, free-form textual summary of the conversation.
 
-[PREVIOUS_STATE_JSON]
-{prev_state_json}
+[PREVIOUS_SUMMARY]
+{prev_summary or ""}
 
 [CONVERSATION_SO_FAR]
 {hist_txt}
@@ -324,30 +316,74 @@ You will maintain a FLAT, NON-STRUCTURED semantic memory.
 [NEW_MESSAGE]
 {new_txt}
 
-Rules:
-1) Only include information explicitly stated in the conversation.
-2) Do NOT invent, infer, or resolve contradictions.
-3) Summarize user goals, constraints, corrections, and unresolved issues in plain text.
-4) Remove obsolete information if explicitly overridden.
-5) Keep memory concise (<= {max_bullets} bullet lines).
+Instructions:
+- Update the summary to reflect the conversation so far.
+- Use natural language only.
+- Do not use bullet points, numbering, section headers, or labels.
+- Do not introduce categories or explicit structure.
+- Only include information explicitly stated in the conversation.
+- If later messages explicitly override earlier content, reflect the update in the summary.
+- Keep the summary concise (<= {max_chars} characters).
 
-Set plan.mode:
-- "verify" ONLY IF there exists a concrete, checkable conflict/violation between
-  (a) the latest message / candidate answer and (b) earlier conversation content,
-  AND this issue can be resolved by pointing to existing context (no new user info needed).
-- "clarify" ONLY IF task-critical information is missing such that proceeding would require guessing.
-  Do not ask the user questions; instead list what is missing implicitly in memory_text.
-- "proceed" otherwise.
-
-Set mismatch:
-- mismatch=true iff the candidate answer (if NEW_MESSAGE is an assistant answer) clearly violates
-  any explicitly stated user constraint (format/style/forbidden actions) OR clearly ignores a required correction.
-- mismatch=false otherwise.
-Be conservative: only set mismatch=true when you can point to explicit evidence in the conversation.
-
-Return JSON ONLY with this schema:
-{json.dumps(schema, ensure_ascii=False)}
+Return ONLY the updated summary text.
 """.strip()
+
+
+# def _flat_controller_prompt(
+#     history: List[Dict[str, str]],
+#     new_msg: Dict[str, str],
+#     prev_state: Optional[Dict[str, Any]],
+#     max_bullets: int = 12,
+# ) -> str:
+#     prev_state_json = json.dumps(prev_state or {}, ensure_ascii=False)
+
+#     hist_txt = "\n\n".join(
+#         f"{m['role'].upper()}: {m.get('content','')}" for m in history
+#     )
+#     new_txt = f"{new_msg['role'].upper()}: {new_msg.get('content','')}"
+
+#     schema = {
+#         "memory_text": "string",
+#         "plan": {"mode": "proceed|verify|clarify", "reasons": ["..."]},
+#         "mismatch": "true|false  # true iff the candidate answer violates any clearly stated constraint or misses a required fix"
+#     }
+
+#     return f"""
+# You will maintain a FLAT, NON-STRUCTURED semantic memory.
+
+# [PREVIOUS_STATE_JSON]
+# {prev_state_json}
+
+# [CONVERSATION_SO_FAR]
+# {hist_txt}
+
+# [NEW_MESSAGE]
+# {new_txt}
+
+# Rules:
+# 1) Only include information explicitly stated in the conversation.
+# 2) Do NOT invent, infer, or resolve contradictions.
+# 3) Summarize user goals, constraints, corrections, and unresolved issues in plain text.
+# 4) Remove obsolete information if explicitly overridden.
+# 5) Keep memory concise (<= {max_bullets} bullet lines).
+
+# Set plan.mode:
+# - "verify" ONLY IF there exists a concrete, checkable conflict/violation between
+#   (a) the latest message / candidate answer and (b) earlier conversation content,
+#   AND this issue can be resolved by pointing to existing context (no new user info needed).
+# - "clarify" ONLY IF task-critical information is missing such that proceeding would require guessing.
+#   Do not ask the user questions; instead list what is missing implicitly in memory_text.
+# - "proceed" otherwise.
+
+# Set mismatch:
+# - mismatch=true iff the candidate answer (if NEW_MESSAGE is an assistant answer) clearly violates
+#   any explicitly stated user constraint (format/style/forbidden actions) OR clearly ignores a required correction.
+# - mismatch=false otherwise.
+# Be conservative: only set mismatch=true when you can point to explicit evidence in the conversation.
+
+# Return JSON ONLY with this schema:
+# {json.dumps(schema, ensure_ascii=False)}
+# """.strip()
 
 
 
