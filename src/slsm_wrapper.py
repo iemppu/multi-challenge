@@ -289,15 +289,15 @@ Output JSON ONLY with this schema (no additional keys):
 
 # flat memory prompt
 FLAT_CONTROLLER_SYSTEM = (
-    "You are a strict flat semantic memory controller. "
-    "Output ONLY valid JSON. No extra text."
+    "You are a strict conversation summarizer for flat memory. "
+    "Output ONLY the updated summary text. No JSON, no extra text."
 )
 
 def _flat_controller_prompt(
     history: List[Dict[str, str]],
     new_msg: Dict[str, str],
     prev_summary: Optional[str],
-    max_chars: int = 600,
+    max_chars: int = 2000,
 ) -> str:
     hist_txt = "\n\n".join(
         f"{m['role'].upper()}: {m.get('content','')}" for m in history
@@ -438,32 +438,48 @@ class FlatMemController:
         new_msg: Dict[str, str],
         prev: Optional[FlatState],
     ) -> FlatState:
+        prev_summary = (prev.memory_text if prev else "") or ""
+
         prompt = _flat_controller_prompt(
             history=history,
             new_msg=new_msg,
-            prev_state=(prev.__dict__ if prev else None),
+            prev_summary=prev_summary,
+            max_chars=600,  # 或者 getattr(self.cfg, "flat_summary_max_chars", 600)
         )
+
         messages = [
             {"role": "system", "content": FLAT_CONTROLLER_SYSTEM},
             {"role": "user", "content": prompt},
         ]
+
         raw = _safe_generate(
             self.llm, messages,
             temp=self.cfg.controller_model_temp,
             max_tokens=self.cfg.controller_max_tokens
         )
-        try:
-            data = json.loads(raw)
-        except Exception as e:
-            st = prev or FlatState()
-            st.plan = {"mode": "verify", "reasons": [f"parse_error: {e}"]}
-            return st
 
+        # ---- normalize summary to match "free-form single paragraph" baseline ----
+        summary = (raw or "").strip()
+
+        # collapse to single paragraph (no newlines)
+        summary = re.sub(r"\s*\n+\s*", " ", summary).strip()
+
+        # remove obvious bullet/number prefixes if the model ignored instructions
+        summary = re.sub(r"(^|\s)([-*•]\s+)", r"\1", summary)
+        summary = re.sub(r"(^|\s)(\d+[\).\]]\s+)", r"\1", summary)
+
+        # enforce char budget (keep the most recent tail, consistent with your to_flat_note)
+        max_chars = getattr(self.cfg, "flat_note_max_chars", 2000)
+        if len(summary) > max_chars:
+            summary = summary[-max_chars:]
+
+        # Keep backward compatibility: plan/mismatch exist but are not used unless you implement them
         return FlatState(
-            memory_text=data.get("memory_text", "") or "",
-            plan=data.get("plan", {"mode": "proceed", "reasons": []}),
-            mismatch=bool(data.get("mismatch", False)),
+            memory_text=summary,
+            plan={"mode": "proceed", "reasons": []},
+            mismatch=False,
         )
+
 
 
 class SLSMWrapper:
