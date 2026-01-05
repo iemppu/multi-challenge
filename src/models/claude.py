@@ -17,38 +17,27 @@ class ClaudeModel(ModelProvider):
 
     def generate(self, messages):
         """
-        messages: list of {role: str, content: str}
+        messages: list of {role: "user" | "assistant", content: str}
         """
 
-        system_text = None
         claude_messages = []
 
         for m in messages:
             role = m["role"]
-            text = m.get("content") or ""
+            if role not in ("user", "assistant"):
+                raise ValueError(f"Unsupported role: {role}")
 
-            if role == "system":
-                system_text = text if system_text is None else system_text + "\n" + text
-            else:
-                claude_messages.append({
-                    "role": role,
-                    "content": [
-                        {"type": "text", "text": text}
-                    ]
-                })
-
-        # 🔥 critical: system must ALWAYS be a list
-        system_blocks = []
-        if system_text:
-            system_blocks = [
-                {"type": "text", "text": system_text}
-            ]
+            claude_messages.append({
+                "role": role,
+                "content": [
+                    {"type": "text", "text": m.get("content", "")}
+                ]
+            })
 
         resp = self.client.messages.create(
             model=self.model,
             temperature=self.temp,
             max_tokens=self.max_tokens,
-            system=system_blocks,
             messages=claude_messages,
         )
 
