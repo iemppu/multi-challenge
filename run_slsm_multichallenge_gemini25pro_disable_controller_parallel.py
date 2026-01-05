@@ -19,7 +19,7 @@ from src.slsm_wrapper import (
 CONCURRENCY = 8
 
 BENCHMARK_FILE = "data/benchmark_questions.jsonl"
-OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gpt-4o-mini_parallel.jsonl"
+OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gpt-4o-mini_disable_controller.jsonl"
 
 UNDERLYING_MODEL = "gemini-2.5-pro"
 CONTROLLER_MODEL = "gpt-4o-mini"  # you can switch to "gpt-5.2-2025-12-11" if your account has access
@@ -57,7 +57,8 @@ controller_llm = OpenAIModel(
 )
 
 cfg = SLSMConfig(
-    inject="on_risk",   # IMPORTANT: use on_risk for fair comparison
+    inject="never",   # IMPORTANT: use on_risk for fair comparison
+    disable_controller=True,
     note_max_items=6,
 )
 
