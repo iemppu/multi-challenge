@@ -16,7 +16,7 @@ from src.slsm_wrapper import (
 # =========================
 # Config
 # =========================
-CONCURRENCY = 16
+CONCURRENCY = 8
 
 BENCHMARK_FILE = "data/benchmark_questions.jsonl"
 OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gpt-4o-mini_always.jsonl"
