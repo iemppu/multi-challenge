@@ -19,7 +19,7 @@ from src.slsm_wrapper import (
 CONCURRENCY = 16
 
 BENCHMARK_FILE = "data/benchmark_questions.jsonl"
-OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gpt-4o-mini_disable_controller.jsonl"
+OUTPUT_FILE = "data/final_model_responses/gemini-2.5-pro_slsm-gpt-4o-mini_always.jsonl"
 
 UNDERLYING_MODEL = "gemini-2.5-pro"
 CONTROLLER_MODEL = "gpt-4o-mini"  # you can switch to "gpt-5.2-2025-12-11" if your account has access
