@@ -6,8 +6,8 @@ from google.genai.types import HttpOptions
 class GeminiModel:
     """
     Drop-in replacement for OpenAIModel with a similar interface.
-    Assumes input messages are OpenAI-style:
-      [{"role": "system|user|assistant", "content": "..."}]
+    Assumes input messages are OpenAI-style but ONLY allows roles:
+      [{"role": "user|assistant", "content": "..."}]
     Returns a plain string response.
     """
 
@@ -18,19 +18,16 @@ class GeminiModel:
         if not self.api_key:
             raise RuntimeError("GOOGLE_API_KEY is not set (env var) and no api_key was provided.")
 
-        # Prefer new SDK google-genai
         self._client_type = None
         try:
             from google import genai  # google-genai
             self._genai = genai
-            # self._client = genai.Client(api_key=self.api_key)
             self._client = genai.Client(api_key=self.api_key, http_options=HttpOptions(api_version="v1"))
             self._client_type = "google-genai"
         except Exception:
             self._genai = None
             self._client = None
 
-        # Fallback to older SDK google-generativeai
         if self._client_type is None:
             try:
                 import google.generativeai as genai_old  # google-generativeai
@@ -47,80 +44,63 @@ class GeminiModel:
                 ) from e
 
     @staticmethod
+    def _validate_prompt(messages: List[Dict[str, Any]]) -> None:
+        # Match MultiChallenge protocol: only user/assistant
+        for m in messages:
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                raise ValueError(
+                    f"Prompt must be a list of dicts with role in {{'user','assistant'}}. Got role={role!r}"
+                )
+
+    @staticmethod
     def _to_gemini_contents(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Convert OpenAI chat messages to Gemini 'contents' format.
-        Gemini expects roles: 'user' or 'model'. System prompt can be folded.
-        We'll prepend system content into the first user message if present.
+        Convert OpenAI chat messages (user/assistant only) to Gemini 'contents' format.
+        Gemini expects roles: 'user' or 'model'.
         """
-        sys_chunks = []
         converted = []
-
         for m in messages:
             role = m.get("role")
             content = m.get("content", "")
 
-            if role == "system":
-                if content:
-                    sys_chunks.append(content)
-                continue
-
             if role == "user":
-                text = content
-                if sys_chunks:
-                    # fold system prompt into first user turn
-                    text = "\n".join(sys_chunks) + "\n\n" + text
-                    sys_chunks = []
-                converted.append({"role": "user", "parts": [{"text": text}]})
+                converted.append({"role": "user", "parts": [{"text": content}]})
             elif role == "assistant":
                 converted.append({"role": "model", "parts": [{"text": content}]})
             else:
-                # unknown role, treat as user
-                converted.append({"role": "user", "parts": [{"text": content}]})
-
-        # If there was only system prompt and no user messages, still create one
-        if sys_chunks and not converted:
-            converted.append({"role": "user", "parts": [{"text": "\n".join(sys_chunks)}]})
+                # Should never happen due to _validate_prompt
+                raise ValueError(f"Unsupported role: {role}")
 
         return converted
 
     def generate(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """
-        Keep name 'generate' to match many wrappers.
-        If your OpenAIModel uses 'chat' instead, add an alias below.
-        """
+        # Enforce the same protocol as OpenAIModel
+        self._validate_prompt(messages)
+
         contents = self._to_gemini_contents(messages)
 
         if self._client_type == "google-genai":
-            # google-genai
             resp = self._client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config={
-                    "temperature": float(self.temp),
-                },
+                config={"temperature": float(self.temp)},
             )
-            # resp.text is usually available; fallback to candidates
             text = getattr(resp, "text", None)
             if text:
                 return text
-            # conservative fallback
             try:
                 return resp.candidates[0].content.parts[0].text
             except Exception:
                 return str(resp)
 
         else:
-            # google-generativeai
             model = self._genai_old.GenerativeModel(self.model)
             resp = model.generate_content(
                 contents,
-                generation_config={
-                    "temperature": float(self.temp),
-                },
+                generation_config={"temperature": float(self.temp)},
             )
             return getattr(resp, "text", "") or str(resp)
 
-    # Optional alias if your code calls .chat(...)
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         return self.generate(messages, **kwargs)
