@@ -1,0 +1,38 @@
+============================================================
+EXPERIMENT CONFIGURATION (OpenRouter)
+============================================================
+Timestamp: 2026-01-05 02:07:09
+Output file: data/final_model_responses/anthropic-claude-3.5-sonnet_slsm-openai-gpt-4o-mini_claude-3.5-sonnet.jsonl
+
+[paths]
+  benchmark_file: data/benchmark_questions.jsonl
+  output_file: data/final_model_responses/anthropic-claude-3.5-sonnet_slsm-openai-gpt-4o-mini_claude-3.5-sonnet.jsonl
+
+[underlying_model]
+  provider: openrouter
+  name: anthropic/claude-3.5-sonnet
+  temperature: 0.0
+  seed: 42
+  top_p: 1.0
+
+[controller_model]
+  provider: openrouter
+  name: openai/gpt-4o-mini
+  temperature: 0.0
+  seed: None
+  top_p: None
+
+[slsm]
+  enabled: True
+  inject: on_risk
+  risk_modes: ['verify', 'clarify']
+  note_max_items: 6
+  gate_facts_by_evidence: True
+
+[run]
+  num_samples: all
+  total_conversations: 273
+  tag: claude-3.5-sonnet
+  parallel: True
+  num_workers: 6
+

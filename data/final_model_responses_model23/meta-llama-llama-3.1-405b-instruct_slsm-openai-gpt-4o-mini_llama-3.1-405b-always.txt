@@ -1,0 +1,40 @@
+============================================================
+EXPERIMENT CONFIGURATION (OpenRouter)
+============================================================
+Timestamp: 2026-01-05 16:41:55
+Output file: data/final_model_responses/meta-llama-llama-3.1-405b-instruct_slsm-openai-gpt-4o-mini_llama-3.1-405b-always.jsonl
+
+[paths]
+  benchmark_file: data/benchmark_questions.jsonl
+  output_file: data/final_model_responses/meta-llama-llama-3.1-405b-instruct_slsm-openai-gpt-4o-mini_llama-3.1-405b-always.jsonl
+
+[underlying_model]
+  provider: openrouter
+  name: meta-llama/llama-3.1-405b-instruct
+  temperature: 0.0
+  seed: 42
+  top_p: 1.0
+
+[controller_model]
+  provider: openrouter
+  name: openai/gpt-4o-mini
+  temperature: 0.0
+  seed: None
+  top_p: None
+
+[slsm]
+  enabled: True
+  disable_controller: False
+  memory_mode: structured
+  inject: always
+  risk_modes: ['verify', 'clarify']
+  note_max_items: 6
+  gate_facts_by_evidence: True
+
+[run]
+  num_samples: all
+  total_conversations: 273
+  tag: llama-3.1-405b-always
+  parallel: True
+  num_workers: 4
+

@@ -50,4 +50,6 @@ htmlcov/
 
 # Project specific
 multi-challenge-orig/
-outputs/
+# outputs/
+data/cache/
+data/failed/

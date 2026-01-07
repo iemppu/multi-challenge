@@ -1,0 +1,40 @@
+============================================================
+EXPERIMENT CONFIGURATION (OpenRouter)
+============================================================
+Timestamp: 2026-01-05 07:00:38
+Output file: data/final_model_responses/openai-gpt-4o-2024-08-06_slsm-openai-gpt-4o-mini_gpt-4o-2024-08-06-always.jsonl
+
+[paths]
+  benchmark_file: data/benchmark_questions.jsonl
+  output_file: data/final_model_responses/openai-gpt-4o-2024-08-06_slsm-openai-gpt-4o-mini_gpt-4o-2024-08-06-always.jsonl
+
+[underlying_model]
+  provider: openrouter
+  name: openai/gpt-4o-2024-08-06
+  temperature: 0.0
+  seed: 42
+  top_p: 1.0
+
+[controller_model]
+  provider: openrouter
+  name: openai/gpt-4o-mini
+  temperature: 0.0
+  seed: None
+  top_p: None
+
+[slsm]
+  enabled: True
+  disable_controller: False
+  memory_mode: structured
+  inject: always
+  risk_modes: ['verify', 'clarify']
+  note_max_items: 6
+  gate_facts_by_evidence: True
+
+[run]
+  num_samples: all
+  total_conversations: 273
+  tag: gpt-4o-2024-08-06-always
+  parallel: True
+  num_workers: 4
+
