@@ -72,6 +72,40 @@ def get_openrouter_model(
     return OpenRouterModel(model=model_name, temp=temperature, seed=seed, top_p=top_p)
 
 
+def verify_model_availability(model_name: str) -> bool:
+    """
+    Check if a model is available on OpenRouter.
+
+    Args:
+        model_name: Model ID (e.g., "openai/gpt-4o", "mistralai/mistral-large")
+
+    Returns:
+        True if the model is available, False otherwise.
+    """
+    import requests
+
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        print("WARNING: OPENROUTER_API_KEY is not set")
+        return False
+
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        models = response.json().get("data", [])
+        available_ids = {m.get("id") for m in models}
+
+        return model_name in available_ids
+    except Exception as e:
+        print(f"ERROR: Failed to check model availability: {e}")
+        return False
+
+
 def build_output_filename(underlying_model: str, controller_model: str, enable_slsm: bool, tag: str = None) -> str:
     """Build output filename based on model names."""
     # Sanitize model names for filename (replace / with -)
@@ -116,6 +150,28 @@ def save_experiment_config(output_file: str, config: Dict[str, Any]):
     return config_file
 
 
+def find_empty_responses(responses_file: str) -> Tuple[set, Dict[str, Any]]:
+    """
+    Find question IDs with empty responses in a JSONL file.
+
+    Returns:
+        Tuple of (empty_qids set, all_responses dict mapping qid -> full record)
+    """
+    empty_qids = set()
+    all_responses = {}
+
+    with open(responses_file, "r", encoding="utf-8") as f:
+        for line in f:
+            data = json.loads(line)
+            qid = data.get("question_id")
+            response = data.get("response", "")
+            all_responses[qid] = data
+            if not response or response.strip() == "":
+                empty_qids.add(qid)
+
+    return empty_qids, all_responses
+
+
 def cmd_run(args, cfg: Dict[str, Any]):
     """Run SLSM benchmark with OpenRouter."""
     from src.data_loader import DataLoader
@@ -137,16 +193,34 @@ def cmd_run(args, cfg: Dict[str, Any]):
     parallel = args.parallel if args.parallel is not None else run_cfg.get("parallel", False)
     num_workers = args.num_workers if args.num_workers is not None else run_cfg.get("num_workers", 3)
 
-    # Model configuration (CLI args override yaml config)
+    # Model configuration (CLI args override yaml config) - NO FALLBACK
     underlying_cfg = models_cfg.get("underlying", {})
     controller_cfg = models_cfg.get("controller", {})
 
-    underlying_model = args.underlying_model or underlying_cfg.get("name", "openai/gpt-4o-2024-08-06")
+    underlying_model = args.underlying_model or underlying_cfg.get("name")
+    if not underlying_model:
+        print("ERROR: underlying model name is required (via --underlying-model or config file)")
+        sys.exit(1)
+
+    # Verify underlying model availability
+    if not verify_model_availability(underlying_model):
+        print(f"ERROR: Model '{underlying_model}' is not available on OpenRouter")
+        sys.exit(1)
+
     underlying_temp = args.underlying_temp if args.underlying_temp is not None else underlying_cfg.get("temperature", 0.0)
     underlying_seed = args.seed if args.seed is not None else underlying_cfg.get("seed")
     underlying_top_p = args.top_p if args.top_p is not None else underlying_cfg.get("top_p")
 
-    controller_model = args.controller_model or controller_cfg.get("name", "openai/gpt-4o-mini")
+    controller_model = args.controller_model or controller_cfg.get("name")
+    if not controller_model:
+        print("ERROR: controller model name is required (via --controller-model or config file)")
+        sys.exit(1)
+
+    # Verify controller model availability
+    if not verify_model_availability(controller_model):
+        print(f"ERROR: Model '{controller_model}' is not available on OpenRouter")
+        sys.exit(1)
+
     controller_temp = args.controller_temp if args.controller_temp is not None else controller_cfg.get("temperature", 0.0)
     controller_seed = controller_cfg.get("seed")  # Controller usually doesn't need seed
     controller_top_p = controller_cfg.get("top_p")
@@ -196,6 +270,8 @@ def cmd_run(args, cfg: Dict[str, Any]):
         )
 
         slsm_config = SLSMConfig(
+            disable_controller=slsm_cfg.get("disable_controller", False),
+            memory_mode=slsm_cfg.get("memory_mode", "structured"),
             inject=slsm_cfg.get("inject", "on_risk"),
             risk_modes=tuple(slsm_cfg.get("risk_modes", ["verify", "clarify"])),
             note_max_items=slsm_cfg.get("note_max_items", 6),
@@ -234,6 +310,8 @@ def cmd_run(args, cfg: Dict[str, Any]):
         },
         "slsm": {
             "enabled": enable_slsm,
+            "disable_controller": slsm_cfg.get("disable_controller", False) if enable_slsm else "N/A",
+            "memory_mode": slsm_cfg.get("memory_mode", "structured") if enable_slsm else "N/A",
             "inject": slsm_cfg.get("inject", "on_risk") if enable_slsm else "N/A",
             "risk_modes": slsm_cfg.get("risk_modes", ["verify", "clarify"]) if enable_slsm else "N/A",
             "note_max_items": slsm_cfg.get("note_max_items", 6) if enable_slsm else "N/A",
@@ -272,6 +350,8 @@ def cmd_run(args, cfg: Dict[str, Any]):
                     seed=controller_seed, top_p=controller_top_p
                 )
                 thread_slsm_config = SLSMConfig(
+                    disable_controller=slsm_cfg.get("disable_controller", False),
+                    memory_mode=slsm_cfg.get("memory_mode", "structured"),
                     inject=slsm_cfg.get("inject", "on_risk"),
                     risk_modes=tuple(slsm_cfg.get("risk_modes", ["verify", "clarify"])),
                     note_max_items=slsm_cfg.get("note_max_items", 6),
@@ -347,6 +427,208 @@ def cmd_test(args):
         print(f"Model info: {model.get_model_info()}")
     except Exception as e:
         print(f"Failed: {e}")
+
+
+def cmd_rerun(args, cfg: Dict[str, Any]):
+    """Rerun only empty responses from an existing response file."""
+    from src.data_loader import DataLoader
+    from src.slsm_wrapper import SLSMConfig, SLSMController, SLSMWrapper
+    import time
+
+    responses_file = args.responses
+    if not responses_file or not os.path.exists(responses_file):
+        print(f"ERROR: Response file not found: {responses_file}")
+        sys.exit(1)
+
+    # Find empty responses
+    print(f"Scanning for empty responses in: {responses_file}")
+    empty_qids, all_responses = find_empty_responses(responses_file)
+
+    if not empty_qids:
+        print("No empty responses found. Nothing to rerun.")
+        return
+
+    print(f"Found {len(empty_qids)} empty responses out of {len(all_responses)} total")
+
+    # Get configuration
+    paths_cfg = cfg.get("paths", {})
+    models_cfg = cfg.get("models", {})
+    slsm_cfg = cfg.get("slsm", {})
+    run_cfg = cfg.get("run", {})
+
+    benchmark_file = args.benchmark or paths_cfg.get("benchmark_file", "data/benchmark_questions.jsonl")
+
+    # Model configuration
+    underlying_cfg = models_cfg.get("underlying", {})
+    controller_cfg = models_cfg.get("controller", {})
+
+    underlying_model = args.underlying_model or underlying_cfg.get("name")
+    if not underlying_model:
+        print("ERROR: underlying model name is required (via --underlying-model or config file)")
+        sys.exit(1)
+
+    underlying_temp = args.underlying_temp if args.underlying_temp is not None else underlying_cfg.get("temperature", 0.0)
+    underlying_seed = args.seed if args.seed is not None else underlying_cfg.get("seed")
+    underlying_top_p = args.top_p if args.top_p is not None else underlying_cfg.get("top_p")
+
+    controller_model = args.controller_model or controller_cfg.get("name")
+    if not controller_model:
+        print("ERROR: controller model name is required (via --controller-model or config file)")
+        sys.exit(1)
+
+    controller_temp = args.controller_temp if args.controller_temp is not None else controller_cfg.get("temperature", 0.0)
+    controller_seed = controller_cfg.get("seed")
+    controller_top_p = controller_cfg.get("top_p")
+
+    enable_slsm = args.enable_slsm if args.enable_slsm is not None else run_cfg.get("enable_slsm", True)
+
+    # Parallel configuration - CLI overrides config
+    parallel = args.parallel if args.parallel is not None else run_cfg.get("parallel", False)
+    num_workers = args.num_workers if args.num_workers is not None else run_cfg.get("num_workers", 2)
+
+    # Retry configuration
+    max_retries = args.max_retries if args.max_retries is not None else 3
+    retry_delay = args.retry_delay if args.retry_delay is not None else 2.0
+
+    # Load benchmark to get conversations for empty qids
+    print(f"Loading benchmark from: {benchmark_file}")
+    dl = DataLoader(input_file=benchmark_file)
+    dl.load_data()
+    all_conversations = dl.get_conversations()
+
+    # Filter to only empty qids
+    qid_to_conv = {conv.question_id: conv for conv in all_conversations}
+    conversations_to_rerun = [qid_to_conv[qid] for qid in empty_qids if qid in qid_to_conv]
+
+    if len(conversations_to_rerun) != len(empty_qids):
+        missing = empty_qids - set(qid_to_conv.keys())
+        print(f"WARNING: {len(missing)} question IDs not found in benchmark")
+
+    print(f"Will rerun {len(conversations_to_rerun)} conversations")
+
+    # Create models
+    print(f"Underlying model (OpenRouter): {underlying_model}")
+    if underlying_seed is not None:
+        print(f"  seed={underlying_seed}, top_p={underlying_top_p}")
+    underlying_llm = get_openrouter_model(
+        underlying_model, underlying_temp,
+        seed=underlying_seed, top_p=underlying_top_p
+    )
+
+    # Build model name
+    if enable_slsm:
+        model_name = f"{underlying_model}+SLSM({controller_model})"
+        print(f"Controller model (OpenRouter): {controller_model}")
+        print(f"SLSM enabled with inject={slsm_cfg.get('inject', 'on_risk')}")
+    else:
+        model_name = underlying_model
+        print("SLSM disabled (baseline mode)")
+
+    # Worker function with retry logic
+    def process_conversation_with_retry(conv) -> Tuple[str, str]:
+        """Process a single conversation with retry on empty response."""
+        messages = conv.conversation
+        qid = conv.question_id
+
+        for attempt in range(max_retries):
+            try:
+                if enable_slsm:
+                    # Create per-thread SLSM wrapper
+                    thread_controller_llm = get_openrouter_model(
+                        controller_model, controller_temp,
+                        seed=controller_seed, top_p=controller_top_p
+                    )
+                    thread_slsm_config = SLSMConfig(
+                        disable_controller=slsm_cfg.get("disable_controller", False),
+                        memory_mode=slsm_cfg.get("memory_mode", "structured"),
+                        inject=slsm_cfg.get("inject", "on_risk"),
+                        risk_modes=tuple(slsm_cfg.get("risk_modes", ["verify", "clarify"])),
+                        note_max_items=slsm_cfg.get("note_max_items", 6),
+                        controller_max_tokens=slsm_cfg.get("controller_max_tokens", 1200),
+                        gate_facts_by_evidence=slsm_cfg.get("gate_facts_by_evidence", True),
+                    )
+                    thread_controller = SLSMController(thread_controller_llm, thread_slsm_config)
+                    thread_wrapper = SLSMWrapper(thread_controller, thread_slsm_config)
+                    response = thread_wrapper.generate_last_turn(
+                        underlying_llm=underlying_llm,
+                        original_conversation=messages,
+                    )
+                else:
+                    response = underlying_llm.generate(messages)
+
+                # Check if response is empty and retry if needed
+                if response and response.strip():
+                    return qid, response
+
+                # Empty response - retry after delay
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    return qid, f"[ERROR] {str(e)}"
+                time.sleep(retry_delay)
+
+        return qid, ""  # Return empty if all retries failed
+
+    # Run rerun
+    print(f"Parallel mode: {num_workers} workers, max_retries={max_retries}")
+    results = []
+
+    if parallel and num_workers > 1:
+        print(f"Starting parallel execution with {num_workers} workers...")
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(process_conversation_with_retry, conv): conv.question_id for conv in conversations_to_rerun}
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Rerunning empty responses"):
+                qid = futures[future]
+                try:
+                    result_qid, response = future.result()
+                    results.append((result_qid, response))
+                except Exception as e:
+                    results.append((qid, f"[ERROR] {str(e)}"))
+    else:
+        for conv in tqdm(conversations_to_rerun, desc="Rerunning empty responses"):
+            qid, response = process_conversation_with_retry(conv)
+            results.append((qid, response))
+
+    # Merge results back
+    rerun_responses = {qid: resp for qid, resp in results}
+    updated_count = 0
+    still_empty = 0
+
+    for qid, resp in rerun_responses.items():
+        if resp and resp.strip() and not resp.startswith("[ERROR]"):
+            all_responses[qid]["response"] = resp
+            updated_count += 1
+        else:
+            still_empty += 1
+
+    # Write updated file
+    output_file = args.output or responses_file
+    if output_file == responses_file:
+        # Backup original
+        backup_file = responses_file + ".bak"
+        import shutil
+        shutil.copy(responses_file, backup_file)
+        print(f"Backed up original to: {backup_file}")
+
+    # Preserve original order from responses file
+    original_order = []
+    with open(responses_file, "r", encoding="utf-8") as f:
+        for line in f:
+            data = json.loads(line)
+            original_order.append(data.get("question_id"))
+
+    with open(output_file, "w", encoding="utf-8") as fout:
+        for qid in original_order:
+            record = all_responses.get(qid)
+            if record:
+                fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    print(f"\nRerun complete:")
+    print(f"  Updated: {updated_count}/{len(empty_qids)}")
+    print(f"  Still empty: {still_empty}")
+    print(f"  Output: {output_file}")
 
 
 def cmd_eval(args, cfg: Dict[str, Any]):
@@ -543,6 +825,32 @@ Available models (examples):
     test_parser.add_argument("--seed", "-s", type=int, help="Random seed for reproducibility")
     test_parser.add_argument("--top-p", type=float, help="Top-p (nucleus sampling) value")
 
+    # --- rerun command ---
+    rerun_parser = subparsers.add_parser("rerun", help="Rerun only empty responses from existing file")
+    rerun_parser.add_argument("--responses", "-r", type=str, required=True,
+                              help="Response JSONL file to scan for empty responses")
+    rerun_parser.add_argument("--output", "-o", type=str,
+                              help="Output file path (default: overwrite input file)")
+    rerun_parser.add_argument("--benchmark", "-b", type=str, help="Benchmark file path")
+    rerun_parser.add_argument("--underlying-model", type=str,
+                              help="Underlying model (e.g., meta-llama/llama-3.1-405b-instruct)")
+    rerun_parser.add_argument("--underlying-temp", type=float, help="Underlying model temperature")
+    rerun_parser.add_argument("--controller-model", type=str,
+                              help="Controller model (e.g., openai/gpt-4o-mini)")
+    rerun_parser.add_argument("--controller-temp", type=float, help="Controller model temperature")
+    rerun_parser.add_argument("--enable-slsm", type=lambda x: x.lower() == "true",
+                              help="Enable SLSM wrapper")
+    rerun_parser.add_argument("--parallel", "-p", type=lambda x: x.lower() == "true",
+                              help="Enable parallel processing (default: use config)")
+    rerun_parser.add_argument("--num-workers", "-w", type=int,
+                              help="Number of parallel workers (overrides config)")
+    rerun_parser.add_argument("--seed", "-s", type=int, help="Random seed for reproducibility")
+    rerun_parser.add_argument("--top-p", type=float, help="Top-p (nucleus sampling) value")
+    rerun_parser.add_argument("--max-retries", type=int, default=3,
+                              help="Max retries for empty responses (default: 3)")
+    rerun_parser.add_argument("--retry-delay", type=float, default=2.0,
+                              help="Delay between retries in seconds (default: 2.0)")
+
     # --- eval command ---
     eval_parser = subparsers.add_parser("eval", help="Run judge evaluation")
     eval_parser.add_argument("--responses", "-r", type=str, required=True, help="Response JSONL file")
@@ -574,6 +882,8 @@ Available models (examples):
         cmd_run(args, cfg)
     elif args.command == "test":
         cmd_test(args)
+    elif args.command == "rerun":
+        cmd_rerun(args, cfg)
     elif args.command == "eval":
         cmd_eval(args, cfg)
     elif args.command == "compare":

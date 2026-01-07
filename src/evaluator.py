@@ -28,9 +28,9 @@ class Evaluator:
         self.conversations = conversations
         self.responses = responses
         self.evaluation_model = OpenAIModel(
-            model="gpt-4o-2024-08-06", 
-            temp=0, 
-            # max_tokens=4096, # by yan
+            model="gpt-4o-2024-08-06",
+            temp=0,
+            seed=42,  # Fixed seed for reproducibility
             response_format=JudgeResponse
         )
         self.results = []
